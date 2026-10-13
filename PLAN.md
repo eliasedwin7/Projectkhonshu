@@ -1,6 +1,7 @@
 # Plan: visions and the voyage
 
-Status: **planned, not started.** Written 13 October 2026.
+Status: **built**, all three stages, on 13 October 2026. See "What was built" at the end for how it
+differs from the plan below.
 
 ## The idea
 
@@ -80,9 +81,23 @@ no sudden sounds.
 
 Distant lightning: with a ceiling view the horizon is off-screen, so it would barely show.
 
-## Decisions still open
+## What was built
 
-1. **Voyage start**: only on a key or remote button (proposed default), or automatically on a loop?
-2. **Destinations**: the four above, or others too, such as an alien planet with moons or a double
-   sunset?
-3. **Pace**: all three stages in one go, or stop after stage 1 for a look (proposed default)?
+The three open decisions were settled as: the voyage starts only on a key or button; the four
+destinations listed above; all three stages built in one go.
+
+Differences from the plan:
+
+- The visions and telescope share `js/visions.js`; the voyage is `js/voyage.js`. `js/sky.js` gained
+  a small `fx` object that both use, instead of a separate director module.
+- The black hole's shadow is a plain black circle drawn by the 2D canvas, with the disc shader
+  adding light on top, rather than one shader doing both.
+- At Saturn the stars are our own sky, since Saturn is a neighbour. The other three destinations
+  use a rotated, mirrored star field so no constellation is recognisable.
+- The wormhole fades in over the stars rather than stretching them into streaks.
+- Jupiter's moons were checked against Meeus's worked example and match, so they are not labelled
+  approximate. Their spacing in the eyepiece is squeezed to fit, and says so.
+- The test switch is `?vision=blackhole&at=0.5` or `?voyage=saturn&at=0.5` in the address.
+
+Not checked, because the test browser only gives still frames: how any of it looks in motion, how
+smoothly the shaders run on the projector PC, and the sound.

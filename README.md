@@ -105,6 +105,40 @@ Khonshu when listening to an external player to avoid overlapping sound.
   from published accounts, not a complete or authoritative record; every nation has its own sky.
   The Emu's outline is a sketch. Turn on **Show constellations** and **Show names** to see it.
 
+## Visions and the voyage
+
+These go beyond the real sky. The status line always says **Imagined** while one is on screen, and
+with **Visions** set to Off (the Real sky default) none of them appears unless you ask for it.
+
+- **Black hole** (**K**): drifts across over about four minutes. The Milky Way and every star
+  behind it are bent with the real lensing formula, so stars slide outward, brighten and double as
+  it passes, around a dark disc with a glowing ring of gas.
+- **Supernova** (**U**): a bright star in view, Betelgeuse or Antares if either is up, swells to
+  outshine everything and fades over four minutes.
+- **Comet** (**O**): an invented great comet in the evening sky. It moves a little each night and
+  its two tails point away from the Sun. With Visions on it comes by itself for about three weeks
+  at a time.
+- **Voyage** (**V**): about fourteen minutes. The view lifts off the ground, the stars stop
+  twinkling, and a wormhole leads to Saturn, a nebula, a point outside the Milky Way and a black
+  hole, then home. Press **V** again to head home early. The music gains a deeper drone on the way.
+
+**Visions** set to Rare or Often lets a black hole or supernova arrive unprompted at night, every
+20–40 or 5–10 minutes. Dreamy uses Rare.
+
+Two more things in this group are real:
+
+- **Next eclipse** (**E**) finds the next lunar eclipse visible from your place, jumps to just
+  before it and plays it at a minute a second, then returns to now.
+- **Zodiacal light**: under a dark sky ("country" or darker) a faint cone of light leans up from
+  where the Sun set or will rise.
+
+## Telescope
+
+Click a planet or the Moon and a round eyepiece view opens, with north up: Saturn with its rings
+at their true tilt for the date, Jupiter with its four large moons where they really are (their
+spacing is squeezed to fit the view), Venus, Mercury and Mars with their true phase, and the Moon
+close up. Click elsewhere to close it.
+
 ## Picture quality
 
 **Quality** (low, medium, high) trades sharpness for speed. If the picture stutters for several
@@ -115,6 +149,9 @@ seconds, Khonshu lowers it by itself and says so in the status line.
 | Key | Action | Key | Action |
 |---|---|---|---|
 | T | Tour of tonight's sky | H | Open the menu |
+| V | Voyage | K | Black hole |
+| U | Supernova | O | Comet |
+| E | Replay the next lunar eclipse | | |
 | F | Fullscreen | Space | Meteor |
 | M | Mute | B | Fireball |
 | C | Toggle constellation figures | S | Meteor shower |
@@ -153,6 +190,10 @@ runs it at up to an hour per second.
   Recent lunar eclipses come out within half a minute of their published times.
 - Satellites use a simplified orbit model that stays within about 15 km of the standard one for a
   week, so passes happen at the right time and place to within a couple of seconds.
+- Jupiter's moons follow Meeus's low-accuracy method, which reproduces his worked example exactly.
+  Saturn's ring tilt comes from the direction of its pole.
+- The black hole bends starlight with the standard point-mass lens formula, and its disc is drawn
+  by following light rays round a non-spinning hole. The hole itself, of course, is not there.
 - Things that are artistic rather than measured: the faintest background stars, the cloud shapes,
   the exact form of the aurora, the meteor rate, and the Sun being drawn larger than life.
   Dreamy also enlarges the Moon and strengthens star twinkle.
@@ -184,9 +225,11 @@ move the sliders, and nothing else in the folder is served.
 | `data/sky-data.js` | Star catalogue and constellation figures |
 | `data/sky-images.js` | Milky Way and Moon images (optional; both are drawn by code if it is missing) |
 | `js/skylore.js` | The Aboriginal sky: names, places and figures |
+| `js/visions.js` | Black hole, supernova, comet, zodiacal light, eclipse replay and the telescope view |
+| `js/voyage.js` | The voyage: wormhole, Saturn, nebula, galaxy and black-hole scenes |
 | `remote.html`, `khonshu_server.py`, `Start Khonshu.bat` | The phone remote |
 | `Khonshu Bedtime.bat` | One-click fullscreen start |
-| `PLAN.md` | Planned but unbuilt: black hole, comet, telescope zoom and an interstellar voyage |
+| `PLAN.md` | The plan the visions and voyage were built from, with notes on what was done |
 
 ## Credits
 
