@@ -13,10 +13,11 @@ const { RAD, sind, cosd, clamp, dot, cross, norm, apply, mul3, toVec } = Astro;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 // "realMeteors" replaces the meteor slider with the rate a real night would give.
 const PRESETS = {
-  real: { motion: reducedMotion ? 0 : 25, aurora: 0, moon: 1, meteors: 0.2, realMeteors: true, clouds: 15, daylight: true, sounds: false, brightness: 100 },
-  dreamy: { motion: reducedMotion ? 0 : 70, aurora: 65, moon: 3, meteors: 3, realMeteors: false, clouds: 15, daylight: false, sounds: false, brightness: 100 },
-  sleep: { motion: reducedMotion ? 0 : 10, aurora: 0, moon: 1, meteors: 0, realMeteors: false, clouds: 20, daylight: false, sounds: false, brightness: 60, volume: 30 },
+  real: { motion: reducedMotion ? 0 : 25, aurora: 0, moon: 1, meteors: 0.2, realMeteors: true, clouds: 15, daylight: true, sounds: false, brightness: 100, visions: 'off' },
+  dreamy: { motion: reducedMotion ? 0 : 70, aurora: 65, moon: 3, meteors: 3, realMeteors: false, clouds: 15, daylight: false, sounds: false, brightness: 100, visions: 'rare' },
+  sleep: { motion: reducedMotion ? 0 : 10, aurora: 0, moon: 1, meteors: 0, realMeteors: false, clouds: 20, daylight: false, sounds: false, brightness: 60, volume: 30, visions: 'off' },
 };
+// "visions" is how often imagined events (js/visions.js) appear by themselves: off, rare or often.
 // "quality" is 0–2 (low to high). "nature" is the level of the night sounds. "alarm" is a wake
 // time as HH:MM, or empty. "weather" matches the clouds to the real sky at the chosen place.
 const DEFAULTS = {
@@ -24,6 +25,7 @@ const DEFAULTS = {
   aurora: 0, lat: -35.28, lon: 149.13, lines: false, names: false, daylight: true, online: true, mirror: false,
   sounds: false, audio: true, autoMenu: true, motion: reducedMotion ? 0 : 25, style: 'real',
   realMeteors: true, quality: 2, nature: 20, culture: 'western', alarm: '', issAlert: true, weather: false,
+  visions: 'off',
 };
 const STORE_KEY = 'khonshu-settings-v5';
 const savedSettings = loadJSON(STORE_KEY);
@@ -105,6 +107,37 @@ let W = 0, H = 0, unit = 1;
 const view = { H: [], HP: [], V: [], C: [], lst: 0, s: 1, cx: 0, cy: 0, zMin: -1 };
 const pt = { x: 0, y: 0, k: 1, up: 0 };
 
+// What js/visions.js and js/voyage.js change about the sky, and where they draw.
+//  lift    0 on the ground → 1 in space: the air stops dimming and shaking the stars, and the
+//          horizon, clouds, Moon and planets are left behind
+//  warp    an extra rotation (or reflection) of the whole star field, for skies seen from elsewhere
+//  lens    a black hole at J2000 direction v; einstein and shadow are its two radii, in radians
+//  nova    one catalogue star given a temporary magnitude
+//  starCut magnitudes taken off the faintest star shown; milkyWay scales the Milky Way
+// The arrays are callbacks: update(now, elapsed) each frame; backdrop, foreground and overlay
+// draw behind the stars, in front of them, and on top of everything; status adds to the readout.
+const fx = {
+  lift: 0, warp: null, lens: { on: false, v: [0, 0, 1], einstein: 0, shadow: 0 }, nova: null, starCut: 0, milkyWay: 1,
+  update: [], backdrop: [], foreground: [], overlay: [], status: [], keys: {}, onSelect: null,
+};
+
+// Gravitational lensing by a point mass. A star at angle β from the hole is seen at
+// θ = (β + √(β² + 4θE²)) / 2 on the same side, brighter by lensGain; lensPoint leaves that
+// displaced direction in `bent`. A second, fainter image sits at θ − β on the far side.
+const bent = [0, 0, 0], tangent = [0, 0, 0];
+let lensGain = 1, lensBeta = 0, lensTheta = 0;
+function lensPoint(x, y, z) {
+  const h = fx.lens.v, c = clamp(x * h[0] + y * h[1] + z * h[2], -1, 1), e = fx.lens.einstein;
+  lensBeta = Math.acos(c);
+  lensTheta = Math.min(Math.PI, (lensBeta + Math.sqrt(lensBeta * lensBeta + 4 * e * e)) / 2);
+  const tx = x - h[0] * c, ty = y - h[1] * c, tz = z - h[2] * c, n = Math.hypot(tx, ty, tz) || 1;
+  tangent[0] = tx / n; tangent[1] = ty / n; tangent[2] = tz / n;   // from the hole toward the star
+  const ct = Math.cos(lensTheta), st = Math.sin(lensTheta);
+  bent[0] = h[0] * ct + tangent[0] * st; bent[1] = h[1] * ct + tangent[1] * st; bent[2] = h[2] * ct + tangent[2] * st;
+  const u = lensBeta / e;
+  lensGain = u > 0.02 ? (u * u + 2) / (2 * u * Math.sqrt(u * u + 4)) + 0.5 : 25;
+}
+
 function updateView(d) {
   view.lst = Astro.siderealTime(d, settings.lon);
   const sL = sind(view.lst), cL = cosd(view.lst), sP = sind(settings.lat), cP = cosd(settings.lat);
@@ -112,6 +145,7 @@ function updateView(d) {
   view.H = [-sL, cL, 0, -sP * cL, -sP * sL, cP, cP * cL, cP * sL, sP];
   view.V = [cA, -sA, 0, -sA * sT, -cA * sT, cT, sA * cT, cA * cT, sT];
   view.HP = mul3(view.H, Astro.precession(d));
+  if (fx.warp) view.HP = mul3(view.HP, fx.warp);
   view.C = mul3(view.V, view.HP);
   view.s = Math.min(W, H) / 2 / (2 * Math.tan(settings.fov * RAD / 4));
   view.cx = W / 2; view.cy = H / 2;
@@ -130,8 +164,10 @@ function projectEnu(e) {
 }
 // J2000 direction → screen; also sets pt.up (sine of the altitude)
 function projectSky(v) {
-  const C = view.C, HP = view.HP, x = v[0], y = v[1], z = v[2];
-  pt.up = HP[6] * x + HP[7] * y + HP[8] * z;
+  const C = view.C, HP = view.HP;
+  let x = v[0], y = v[1], z = v[2];
+  if (fx.lens.on) { lensPoint(x, y, z); x = bent[0]; y = bent[1]; z = bent[2]; }
+  pt.up = fx.lift >= 1 ? 1 : HP[6] * x + HP[7] * y + HP[8] * z;   // in space there is no horizon
   return projectCam(C[0] * x + C[1] * y + C[2] * z, C[3] * x + C[4] * y + C[5] * z, C[6] * x + C[7] * y + C[8] * z);
 }
 const onScreen = m => pt.x > m && pt.x < W - m && pt.y > m && pt.y < H - m;
@@ -188,6 +224,14 @@ function updateEnvironment() {
   env.mw = clamp((env.limMag - 5.2) / 1.8, 0, 1) ** 1.5;
   const sky = ramp(TWILIGHT_SKY, env.sunAlt), g = env.glare, m = moon.glow * env.night;
   env.bg = [sky[0] + g * 30 + m * 7, sky[1] + g * 24 + m * 9, sky[2] + g * 20 + m * 14].map(v => Math.min(255, Math.round(v)));
+  if (fx.lift > 0) {
+    // rising above the air: the sky goes black and every star comes out
+    const up = fx.lift;
+    env.limMag += (8.4 - env.limMag) * up; env.night += (1 - env.night) * up; env.mw += (1 - env.mw) * up;
+    env.glare *= 1 - up;
+    env.bg = env.bg.map(v => Math.round(v * (1 - up)));
+  }
+  env.limMag -= fx.starCut; env.mw *= fx.milkyWay;
   env.bgCss = `rgb(${env.bg})`;
 }
 const visible = mag => clamp((env.limMag - mag) / 1.2, 0, 1);
@@ -387,9 +431,11 @@ const SHADER_HEAD = `
     return uRot * vec3(p * (1.0 + dz) * 0.5, dz);
   }`;
 
-function createShaderLayer(body, downscale) {
+// With `solid` set, the shader's alpha hides what is behind it (premultiplied: alpha 0 still adds
+// light, alpha 1 covers); otherwise the layer only ever adds light.
+function createShaderLayer(body, downscale, solid = false) {
   const c = document.createElement('canvas');
-  const gl = c.getContext('webgl', { alpha: false, antialias: false, depth: false });
+  const gl = c.getContext('webgl', { alpha: solid, premultipliedAlpha: true, antialias: false, depth: false });
   if (!gl) return null;
   const compile = (type, code) => {
     const shader = gl.createShader(type);
@@ -421,7 +467,9 @@ function createShaderLayer(body, downscale) {
       gl.uniform1f(uniform('uScale'), view.s * q);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       ctx.globalAlpha = 1;
+      if (solid) ctx.globalCompositeOperation = 'source-over';
       ctx.drawImage(c, 0, 0, W, H);
+      ctx.globalCompositeOperation = 'lighter';
     },
   };
 }
@@ -430,10 +478,16 @@ function createShaderLayer(body, downscale) {
 // With the NASA all-sky photo available, a shader looks up which part of that map each pixel is
 // showing. Otherwise it falls back to a cloud of soft sprites sampled from a model of the Galaxy.
 const milkyWayPhoto = IMAGES && IMAGES.milkyWay ? createShaderLayer(`
-  uniform sampler2D uTex; uniform vec3 uUp; uniform float uGain;
+  uniform sampler2D uTex; uniform vec3 uUp, uHole; uniform float uGain, uEinstein, uSpace;
   void main() {
     vec3 e = direction();                                          // J2000
-    float fade = smoothstep(-0.02, 0.2, dot(uUp, e));              // lost in the haze near the horizon
+    float fade = max(uSpace, smoothstep(-0.02, 0.2, dot(uUp, e))); // lost in the haze near the horizon
+    if (uEinstein > 0.0) {
+      // light bent round a black hole: find where this pixel's ray really came from
+      float c = clamp(dot(e, uHole), -1.0, 1.0), theta = acos(c);
+      float beta = theta - uEinstein * uEinstein / max(theta, 0.0005);
+      e = uHole * cos(beta) + normalize(e - uHole * c) * sin(beta);
+    }
     // the map is centred on RA 0 with RA increasing to the left, north at the top
     vec2 uv = vec2(0.5 - atan(e.y, e.x) / 6.2831853, 0.5 - asin(clamp(e.z, -1.0, 1.0)) / 3.14159265);
     vec3 c = texture2D(uTex, uv).rgb;
@@ -538,6 +592,9 @@ function drawMilkyWay() {
   if (env.mw < 0.02) return;
   if (milkyWayPhoto && milkyWayPhoto.ready) {
     milkyWayPhoto.set('uUp', view.HP[6], view.HP[7], view.HP[8]);
+    milkyWayPhoto.set('uSpace', fx.lift);
+    milkyWayPhoto.set('uHole', ...fx.lens.v);
+    milkyWayPhoto.set('uEinstein', fx.lens.on ? fx.lens.einstein : 0);
     milkyWayPhoto.set('uGain', 0.28 * env.mw);
     milkyWayPhoto.draw(view.C);
   } else {
@@ -645,8 +702,11 @@ function updateSunMoon(d) {
 }
 
 function drawMoon() {
-  if (!moon.visible) return;
-  const { x, y, r, illum, fade } = moon, turn = moon.northAngle + Math.PI / 2;
+  if (moon.visible) drawMoonAt(moon.x, moon.y, moon.r, moon.fade);
+}
+// the Moon as it looks right now, at any place and size (the telescope view draws it large)
+function drawMoonAt(x, y, r, fade) {
+  const illum = moon.illum, turn = moon.northAngle + Math.PI / 2;
   const halo = r * (3 + 5 * illum), light = (1 - 0.95 * moon.eclipsed) * (0.25 + 0.75 * env.night);
   ctx.globalCompositeOperation = 'lighter';
   ctx.globalAlpha = fade * (0.1 + 0.4 * illum) * light;
@@ -691,7 +751,7 @@ function drawMoon() {
 
 // glow of the Sun on the sky around it, from below the horizon at dusk to full day
 function drawTwilight() {
-  const strength = ramp(TWILIGHT_GLOW, env.sunAlt);
+  const strength = ramp(TWILIGHT_GLOW, env.sunAlt) * (1 - fx.lift);
   if (strength < 0.01 || !projectEnu(env.sunEnu)) return;
   const high = clamp(env.sunAlt / 10, 0, 1), radius = view.s * 1.3;
   const inner = [255, 120 + 130 * high, 35 + 200 * high].map(Math.round), outer = [235 - 55 * high, 70 + 140 * high, 60 + 195 * high].map(Math.round);
@@ -867,7 +927,7 @@ function updateAurora(dt) {
 }
 
 function drawAurora(t) {
-  const strength = aurora.level * env.night;
+  const strength = aurora.level * env.night * (1 - fx.lift);
   if (strength < 0.01) return;
   if (auroraLayer) {
     auroraLayer.set('uTime', t % 100000);
@@ -1004,7 +1064,7 @@ function drawClouds(t) {
   cloudCtx.globalAlpha = 1; cloudCtx.fillStyle = `rgb(${colour})`;
   cloudCtx.fillRect(0, 0, w, h);
   ctx.globalCompositeOperation = 'source-over';
-  ctx.globalAlpha = 0.92;
+  ctx.globalAlpha = 0.92 * (1 - fx.lift) ** 2;   // left below on the way up
   ctx.drawImage(cloudLayer, 0, 0, W, H);
 }
 
@@ -1186,18 +1246,20 @@ function drawDim(t) {
   for (let k = 0; k < dimBuckets.length; k++) {
     const idx = dimBuckets[k], level = Math.floor(k / PHASES), ph = k % PHASES, vis = visible(LEVEL_MAG[level]);
     if (vis < 0.02) continue;
-    const size = LEVEL_SIZE[level] * unit, half = size / 2, round = size > 2.2, minUp = LEVEL_MIN_UP[level];
-    const life = settings.motion / 100;
+    const size = LEVEL_SIZE[level] * unit, half = size / 2, round = size > 2.2;
+    const minUp = LEVEL_MIN_UP[level] - 3 * fx.lift;   // no horizon once off the ground
+    const life = settings.motion / 100, lensed = fx.lens.on;
     const shimmer = 0.65 * Math.sin(t * (0.5 + 0.23 * ph) + ph * 1.7 + level)
       + 0.35 * Math.sin(t * (1.3 + 0.17 * level) + ph * 3.1);
-    const amplitude = 0.06 + 0.18 * life;
+    const amplitude = (0.06 + 0.18 * life) * (1 - fx.lift);
     ctx.globalAlpha = LEVEL_ALPHA[level] * vis * (1 - amplitude + amplitude * shimmer);
     ctx.fillStyle = FAINT_TINTS[ph];
     ctx.beginPath();
     for (let j = 0; j < idx.length; j++) {
       const i = idx[j] * 3;
       if (i >= limit) break;   // each bucket is in ascending order
-      const x = dimV[i], y = dimV[i + 1], z = dimV[i + 2];
+      let x = dimV[i], y = dimV[i + 1], z = dimV[i + 2];
+      if (lensed) { lensPoint(x, y, z); x = bent[0]; y = bent[1]; z = bent[2]; }
       const dz = C[6] * x + C[7] * y + C[8] * z;
       if (dz < zMin || Hm[6] * x + Hm[7] * y + Hm[8] * z < minUp) continue;
       const kk = s * 2 / (1 + dz), px = cx + kk * (C[0] * x + C[1] * y + C[2] * z);
@@ -1213,20 +1275,22 @@ function drawDim(t) {
 
 function drawBright(t) {
   const C = view.C, Hm = view.HP, s = view.s, cx = view.cx, cy = view.cy, zMin = view.zMin, margin = 30 * unit;
-  for (let i = 0; i < spriteCount; i++) {
-    if (catMag[i] > env.limMag) break;   // sorted brightest first
-    const x = catV[i * 3], y = catV[i * 3 + 1], z = catV[i * 3 + 2];
+  const space = fx.lift >= 1, calm = 1 - fx.lift;
+  // one image of star i in direction (x, y, z), `gain` times its usual brightness
+  const draw = (i, x, y, z, gain) => {
     const dz = C[6] * x + C[7] * y + C[8] * z;
-    if (dz < zMin) continue;
-    const up = Hm[6] * x + Hm[7] * y + Hm[8] * z;
-    if (up < 0) continue;
+    if (dz < zMin) return;
+    const up = space ? 1 : Hm[6] * x + Hm[7] * y + Hm[8] * z;
+    if (up < 0) return;
     const kk = s * 2 / (1 + dz), px = cx + kk * (C[0] * x + C[1] * y + C[2] * z);
-    if (px < -margin || px > W + margin) continue;
+    if (px < -margin || px > W + margin) return;
     const py = cy - kk * (C[3] * x + C[4] * y + C[5] * z);
-    if (py < -margin || py > H + margin) continue;
-    const b = SPRITE_MAG - catMag[i], air = airmass(up), f = catSpeed[i], ph = catPhase[i];
+    if (py < -margin || py > H + margin) return;
+    // a supernova, or the pull of a lens, changes how bright the star looks
+    const mag = (fx.nova && fx.nova.index === i ? fx.nova.mag : catMag[i]) - 2.5 * Math.log10(gain);
+    const b = SPRITE_MAG - mag, air = airmass(up), f = catSpeed[i], ph = catPhase[i];
     const life = settings.motion / 100;
-    const amp = Math.min(0.6, 0.04 + 0.2 * life + 0.055 * (air - 1));
+    const amp = Math.min(0.6, 0.04 + 0.2 * life + 0.055 * (air - 1)) * calm;
     const flick = 0.5 * Math.sin(t * (9 + 5 * f) + ph) + 0.3 * Math.sin(t * (17 + 9 * f) + ph * 2.3)
       + 0.4 * Math.sin(t * (3.1 + f) + ph * 1.7);
     let tint = catTint[i];
@@ -1240,10 +1304,23 @@ function drawBright(t) {
     const slow = Math.sin(t * (0.7 + f * 0.35) + ph)
       * Math.sin(t * (1.1 + f * 0.21) + ph * 2.7);
     const scintillation = 1 + amp * (flick * (1 - 0.35 * life) + slow * life);
-    const size = (5 + 7 * b) * unit * (1 + 0.45 * amp * slow * life + 0.3 * amp * flick);
-    const base = Math.min(0.6 + 0.12 * b, 1 - 0.22 * life);
-    ctx.globalAlpha = clamp(base * extinction(air) * scintillation, 0, 1) * visible(catMag[i]);
+    const size = Math.max(2.4, 5 + 7 * b) * unit * (1 + 0.45 * amp * slow * life + 0.3 * amp * flick);
+    const base = Math.min(0.6 + 0.12 * b, 1 - 0.22 * life * calm);
+    ctx.globalAlpha = clamp(base * extinction(air) * scintillation, 0, 1) * visible(mag);
     ctx.drawImage(sprites[tint], px - size / 2, py - size / 2, size, size);
+  };
+  for (let i = 0; i < spriteCount; i++) {
+    if (catMag[i] > env.limMag + 2.5) break;   // sorted brightest first; a lens can lift a few into view
+    const x = catV[i * 3], y = catV[i * 3 + 1], z = catV[i * 3 + 2];
+    if (!fx.lens.on) { draw(i, x, y, z, 1); continue; }
+    lensPoint(x, y, z);
+    const h = fx.lens.v, far = lensTheta - lensBeta, faint = lensGain - 1;
+    draw(i, bent[0], bent[1], bent[2], Math.min(lensGain, 12));
+    // the second image, on the far side of the hole, unless it falls inside the shadow
+    if (faint > 0.03 && far > fx.lens.shadow * 1.05) {
+      const c = Math.cos(far), sn = Math.sin(far);
+      draw(i, h[0] * c - tangent[0] * sn, h[1] * c - tangent[1] * sn, h[2] * c - tangent[2] * sn, Math.min(faint, 12));
+    }
   }
 }
 
@@ -1369,7 +1446,7 @@ function moonPhaseName() {
 // What the info card says about each kind of thing, and how to keep following it on screen.
 const skyPosition = v => () => projectSky(v) && pt.up > 0 ? [pt.x, pt.y] : null;
 const describeMoon = () => ({
-  title: 'Moon', radius: moon.r,
+  title: 'Moon', radius: moon.r, kind: 'moon',
   lines: [`${Math.round(moon.illum * 100)}% lit · ${moonPhaseName()}`, `${Math.round(moon.km).toLocaleString()} km away`,
     moon.eclipsed > 0 ? 'Passing through Earth\'s shadow: a lunar eclipse.' : 'Earth\'s only natural satellite.'],
   pos: () => moon.visible ? [moon.x, moon.y] : null,
@@ -1379,7 +1456,7 @@ const describeSatellite = s => ({
   pos: () => s.fade > 0.05 && projectEnu(s.enu) ? [pt.x, pt.y] : null,
 });
 const describePlanet = p => ({
-  title: p.name, lines: [`Magnitude ${p.mag.toFixed(1)} · ${formatKm(p.dist * 149597871)} away`, PLANET_NOTES[p.name]],
+  title: p.name, kind: 'planet', planet: p, lines: [`Magnitude ${p.mag.toFixed(1)} · ${formatKm(p.dist * 149597871)} away`, PLANET_NOTES[p.name]],
   pos: skyPosition(p.vec),
 });
 const describeDeepSky = o => ({
@@ -1431,6 +1508,7 @@ function identify(x, y) {
   }
   tour = null;
   selected = best ? Object.assign(best(), { until: nowSec() + 14 }) : null;
+  if (fx.onSelect) fx.onSelect(selected);
 }
 
 // ───────────────────────── tonight's tour ─────────────────────────
@@ -1575,6 +1653,8 @@ function frame(ms) {
   updateSatellites(elapsed);
   updateAurora(elapsed);
   updateTour(now);
+  for (const update of fx.update) update(now, elapsed);
+  const space = fx.lift >= 1;   // off the ground: nothing of Earth's sky is left in view
 
   // If frames keep arriving slowly, step the quality down rather than stutter all night.
   // Long gaps are a hidden or paused tab, not a slow machine, so they are ignored.
@@ -1593,7 +1673,7 @@ function frame(ms) {
 
   if (now > radiant.until) pickRadiant(now);
   if (now >= nextMeteor) {
-    if (env.night > 0.2) spawnMeteor(now, { fromRadiant: now < showerUntil });
+    if (env.night > 0.2 && fx.lift < 0.3) spawnMeteor(now, { fromRadiant: now < showerUntil });
     scheduleMeteor(now);
   }
   if (now >= nextSatellite) {
@@ -1611,23 +1691,30 @@ function frame(ms) {
   ctx.globalCompositeOperation = 'lighter';
   drawTwilight();
   drawMilkyWay();
-  drawDeepSky();
-  if (lineAlpha > 0.01) drawLines(lineAlpha);
+  for (const draw of fx.backdrop) { draw(now); ctx.globalCompositeOperation = 'lighter'; }
+  if (!fx.warp) drawDeepSky();
+  if (lineAlpha > 0.01 && !space) drawLines(lineAlpha);
   drawDim(now);
   drawBright(now);
-  drawPlanets(now);
-  drawSun();
-  drawMoon();
-  drawAurora(now);
-  drawSatellites(now);
-  for (let i = meteors.length - 1; i >= 0; i--) {
-    if (!drawMeteor(meteors[i], now, env.night)) meteors.splice(i, 1);
+  if (!space) {
+    drawPlanets(now);
+    drawSun();
+    drawMoon();
+    drawAurora(now);
   }
-  drawClouds(now);
-  drawGround();
-  ctx.globalCompositeOperation = 'lighter';
-  if (nameAlpha > 0.01) drawLabels(nameAlpha);
-  drawSelection(now);
+  for (const draw of fx.foreground) { draw(now); ctx.globalCompositeOperation = 'lighter'; }
+  if (!space) {
+    drawSatellites(now);
+    for (let i = meteors.length - 1; i >= 0; i--) {
+      if (!drawMeteor(meteors[i], now, env.night * (1 - fx.lift))) meteors.splice(i, 1);
+    }
+    drawClouds(now);
+    drawGround();
+    ctx.globalCompositeOperation = 'lighter';
+    if (nameAlpha > 0.01) drawLabels(nameAlpha);
+    drawSelection(now);
+  }
+  for (const draw of fx.overlay) draw(now);
 
   // The sleep timer fades the picture out with the music; the sunrise alarm brings it back early
   // in its dawn so there is something to wake to.
@@ -1719,7 +1806,7 @@ function applySettings() {
   SkyAudio.setNature(settings.nature / 100);
   for (const key in FORMAT) { $(key).value = settings[key]; $('o-' + key).textContent = FORMAT[key](settings[key]); }
   for (const key of TOGGLES) $(key).checked = settings[key];
-  $('culture').value = settings.culture; $('alarm').value = settings.alarm;
+  $('culture').value = settings.culture; $('alarm').value = settings.alarm; $('visions').value = settings.visions;
   $('lat').value = settings.lat; $('lon').value = settings.lon;
   const city = CITIES.find(c => Math.abs(c[1] - settings.lat) < 0.02 && Math.abs(c[2] - settings.lon) < 0.02);
   $('city').value = city ? city[0] : '';
@@ -1730,6 +1817,7 @@ function applySettings() {
 function change(key, value) {
   if (!(key in DEFAULTS) || typeof value !== typeof DEFAULTS[key] || Number.isNaN(value)) return;
   if (key === 'culture' && value !== 'western' && value !== 'aboriginal') return;
+  if (key === 'visions' && !['off', 'rare', 'often'].includes(value)) return;
   if (key === 'alarm' && !/^(([01]\d|2[0-3]):[0-5]\d)?$/.test(value)) return;
   const input = $(key);
   if (input && input.type === 'range') value = clamp(value, +input.min, +input.max);
@@ -1781,7 +1869,9 @@ function updateReadout(now) {
   updateShower();
   if (realSats.length && now - lastPassCheck > 600) {
     lastPassCheck = now;
-    issPass = findNextPass(realSats[0].el, simTime);
+    // orbits drift, so a pass is only predicted within three weeks of the orbit data
+    const el = realSats[0].el;
+    issPass = Math.abs(simTime - el.epochMs) < 21 * 86400000 ? findNextPass(el, simTime) : 0;
   }
   const ns = settings.lat < 0 ? 'S' : 'N', ew = settings.lon < 0 ? 'W' : 'E';
   const simulated = speedIdx || Math.abs(timeOffset) > 1000;
@@ -1834,6 +1924,7 @@ function updateReadout(now) {
   if (env.dawn !== null) parts.push('Wake-up dawn');
   else if (sleepAt) parts.push(fade > 0 ? 'Sleep timer: fades out by ' + clock(sleepAt) : 'Asleep: move the mouse to bring the sky back');
   if (settings.alarm && env.dawn === null) parts.push('Wake-up dawn set for ' + settings.alarm);
+  for (const status of fx.status) { const text = status(); if (text) parts.push(text); }
   if (remote.url) parts.push('Phone remote: ' + remote.url);
   remote.status = parts.join('  ·  ');
   $('readout').textContent = remote.status;
@@ -1853,6 +1944,7 @@ $('city').addEventListener('change', e => {
 $('go').addEventListener('click', () => goToTime(new Date($('when').value).getTime()));
 $('culture').addEventListener('change', e => change('culture', e.target.value));
 $('alarm').addEventListener('change', e => change('alarm', e.target.value));
+$('visions').addEventListener('change', e => change('visions', e.target.value));
 
 // each step of the ceiling setup: what to ask, and what each answer does
 const SETUP_STEPS = [null, {
@@ -2017,6 +2109,7 @@ window.addEventListener('keydown', e => {
   else if (key === 's') startShower();
   else if (key === 'b') ACTIONS.fireball();
   else if (key === ' ') { e.preventDefault(); ACTIONS.meteor(); }
+  else if (Object.hasOwn(fx.keys, key)) fx.keys[key]();
 });
 
 // ───────────────────────── phone remote ─────────────────────────
@@ -2059,6 +2152,17 @@ async function connectRemote() {
     pollRemote();
   } catch {}
 }
+
+// What js/visions.js and js/voyage.js build on. Everything else in this file stays private.
+window.KhonshuSky = {
+  fx, settings, view, pt, env, moon, ctx, change, actions: ACTIONS, audio: SkyAudio,
+  get W() { return W; }, get H() { return H; }, get unit() { return unit; },
+  get simTime() { return simTime; }, get started() { return started; },
+  now: nowSec, projectSky, projectEnu, onScreen, screenBearing, altAz, createShaderLayer, buildBlob, buildSprite,
+  blobs, sprites, catV, catMag, starNames, visible, airmass, extinction, drawMoonAt, describeMoon, wrapText, setSpacing,
+  goToTime, goLive, setSpeed, select(item, seconds) { tour = null; selected = item && Object.assign(item, { until: nowSec() + seconds }); },
+  refreshStatus() { lastReadout = -10; },
+};
 
 resize();
 bakeClouds();

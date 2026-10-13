@@ -96,6 +96,20 @@
 </section>
 
 <section>
+  <h2>Visions and voyage</h2>
+  <label><span>Visions by themselves</span><select id="visions">
+    <option value="off">Off</option><option value="rare">Rare</option><option value="often">Often</option>
+  </select></label>
+  <div class="buttons">
+    <button data-action="voyage">Voyage</button>
+    <button data-action="blackhole">Black hole</button>
+    <button data-action="supernova">Supernova</button>
+    <button data-action="comet">Comet</button>
+    <button data-action="eclipse">Next eclipse</button>
+  </div>
+</section>
+
+<section>
   <h2>Time</h2>
   <label><span>Speed <output id="o-speed"></output></span><input type="range" id="speed" min="0" max="4" step="1"></label>
   <div class="pair"><input type="datetime-local" id="when"><button id="go">Go</button></div>
@@ -139,6 +153,7 @@ $('speed').addEventListener('input', e => { $('o-speed').textContent = SPEED_LAB
 $('sleep').addEventListener('change', e => send({ sleep: +e.target.value }));
 $('style').addEventListener('change', e => send({ style: e.target.value }));
 $('alarm').addEventListener('change', e => send({ set: { alarm: e.target.value } }));
+$('visions').addEventListener('change', e => send({ set: { visions: e.target.value } }));
 $('alarm-clear').addEventListener('click', () => { $('alarm').value = ''; send({ set: { alarm: '' } }); });
 $('go').addEventListener('click', () => {
   const ms = new Date($('when').value).getTime();
@@ -161,6 +176,7 @@ async function refresh() {
       $('speed').value = state.speed || 0; $('o-speed').textContent = SPEED_LABELS[state.speed || 0];
       $('style').value = state.settings.style || 'custom';
       $('alarm').value = state.settings.alarm || '';
+      $('visions').value = state.settings.visions || 'off';
       document.querySelector('[data-action="mute"]').textContent = state.settings.audio === false ? 'Unmute' : 'Mute';
     }
   } catch {

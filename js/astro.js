@@ -163,10 +163,35 @@ function updatePlanets(d) {
     const r = Math.hypot(h[0], h[1], h[2]);
     p.dist = Math.hypot(g[0], g[1], g[2]);
     const phase = Math.acos(clamp(dot(h, g) / (r * p.dist), -1, 1)) / RAD;
+    p.phase = phase;   // Sun–planet–Earth angle, degrees: 0 is fully lit
     p.mag = p.magnitude(5 * Math.log10(r * p.dist), phase);
     p.vec = norm([g[0], g[1] * ce - g[2] * se, g[1] * se + g[2] * ce]);
   }
   return PLANETS;
+}
+
+// Jupiter's four large moons as seen from Earth, by the low-accuracy method of Meeus ch. 44.
+// x and y are in Jupiter radii, x positive to the west and y positive to the north of the planet;
+// `near` is true while the moon is on our side of Jupiter.
+function jupiterMoons(d) {
+  const t = d + DELTA_T, V = 172.74 + 0.00111588 * t, M = 357.529 + 0.9856003 * t;
+  const N = 20.020 + 0.0830853 * t + 0.329 * sind(V), J = 66.115 + 0.9025179 * t - 0.329 * sind(V);
+  const A = 1.915 * sind(M) + 0.020 * sind(2 * M), B = 5.555 * sind(N) + 0.168 * sind(2 * N), K = J + A - B;
+  const R = 1.00014 - 0.01671 * cosd(M) - 0.00014 * cosd(2 * M);
+  const r = 5.20872 - 0.25208 * cosd(N) - 0.00611 * cosd(2 * N);
+  const dist = Math.sqrt(r * r + R * R - 2 * r * R * cosd(K)), psi = Math.asin(R / dist * sind(K)) / RAD;
+  const lambda = 34.35 + 0.083091 * t + 0.329 * sind(V) + B;
+  const tilt = 3.12 * sind(lambda + 42.8) - 2.22 * sind(psi) * cosd(lambda + 22) - 1.30 * (r - dist) / dist * sind(lambda - 100.5);
+  const days = t - dist / 173, turn = psi - B;   // allow for the light's travel time
+  const u1 = 163.8069 + 203.4058646 * days + turn, u2 = 358.4140 + 101.2916335 * days + turn;
+  const u3 = 5.7176 + 50.2345180 * days + turn, u4 = 224.8092 + 21.4879800 * days + turn;
+  const G = 331.18 + 50.310482 * days, H = 87.45 + 21.569231 * days;
+  return [
+    ['Io', u1 + 0.473 * sind(2 * (u1 - u2)), 5.9057 - 0.0244 * cosd(2 * (u1 - u2))],
+    ['Europa', u2 + 1.065 * sind(2 * (u2 - u3)), 9.3966 - 0.0882 * cosd(2 * (u2 - u3))],
+    ['Ganymede', u3 + 0.165 * sind(G), 14.9883 - 0.0216 * cosd(G)],
+    ['Callisto', u4 + 0.843 * sind(H), 26.3627 - 0.1939 * cosd(H)],
+  ].map(([name, u, radius]) => ({ name, x: radius * sind(u), y: -radius * cosd(u) * sind(tilt), near: cosd(u) > 0 }));
 }
 
 // ───────────────────────── satellites ─────────────────────────
@@ -214,6 +239,6 @@ function geomagneticLatitude(lat, lon) {
 return {
   RAD, EARTH_RADIUS, sind, cosd, clamp, dot, cross, norm, apply, mul3, toVec, days, siderealTime, precession,
   galactic, sun, moon, PLANETS, updatePlanets, parseTLE, satellitePosition, observerPosition, sunlit,
-  geomagneticLatitude,
+  geomagneticLatitude, eclipticToEquatorial, jupiterMoons,
 };
 })();

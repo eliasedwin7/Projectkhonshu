@@ -115,7 +115,7 @@
   <p>a living night sky</p>
   <button id="begin">Begin</button>
   <small>F fullscreen &nbsp;·&nbsp; M mute &nbsp;·&nbsp; C toggle constellations &nbsp;·&nbsp; N toggle names &nbsp;·&nbsp; A aurora &nbsp;·&nbsp; D daylight &nbsp;·&nbsp; L live time<br>
-    Space meteor &nbsp;·&nbsp; B fireball &nbsp;·&nbsp; S shower &nbsp;·&nbsp; T tour of tonight's sky &nbsp;·&nbsp; click anything in the sky to identify it<br>
+    Space meteor &nbsp;·&nbsp; B fireball &nbsp;·&nbsp; S shower &nbsp;·&nbsp; T tour of tonight's sky &nbsp;·&nbsp; V voyage &nbsp;·&nbsp; click anything in the sky to identify it<br>
     Move the mouse over the menu area at the bottom for controls &nbsp;·&nbsp; H open controls &nbsp;·&nbsp; Esc hide controls</small>
 </div>
 
@@ -171,6 +171,16 @@
     <button id="turn" title="Run time at one minute per second to see Earth's rotation">Watch sky turn</button>
     <button id="tour" title="Rings one thing at a time in tonight's sky and says what it is; shortcut T">Tour</button>
     <button id="setup-open" title="Three questions that set mirroring, direction and life-size scale for a ceiling">Ceiling setup</button>
+  </div>
+  <div class="row">
+    <label title="How often imagined events appear by themselves at night. Off keeps the sky strictly real.">Visions <select id="visions">
+      <option value="off">Off</option><option value="rare">Rare</option><option value="often">Often</option>
+    </select></label>
+    <button data-vision="voyage" title="Leave Earth and travel through a wormhole to Saturn, a nebula, the edge of the galaxy and a black hole, then home. About 14 minutes; shortcut V">Voyage</button>
+    <button data-vision="blackhole" title="Imagined: a black hole drifts across, bending the starlight behind it; shortcut K">Black hole</button>
+    <button data-vision="supernova" title="Imagined: a bright star explodes and fades; shortcut U">Supernova</button>
+    <button data-vision="comet" title="Imagined: a great comet in the evening sky; shortcut O">Comet</button>
+    <button data-vision="eclipse" title="Real: jump to the next lunar eclipse visible from here and watch it sped up; shortcut E">Next eclipse</button>
     <span class="spacer"></span>
     <button id="shower">Meteor shower</button>
     <button id="fs">Fullscreen</button>
@@ -195,5 +205,7 @@
 <script src="js/skylore.js"></script>
 <script src="js/sound-collection.js"></script>
 <script src="js/sky.js"></script>
+<script src="js/visions.js"></script>
+<script src="js/voyage.js"></script>
 </body>
 </html>

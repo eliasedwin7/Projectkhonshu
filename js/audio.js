@@ -255,5 +255,32 @@ function setMuted(value) {
   muted = value; setVolume(volume);
 }
 
-return { start, meteor, chime, setVolume, setNature, setMuted };
+// a low chord that rises and falls over half a minute, to mark something appearing in the sky
+function swell() {
+  if (!ac || ac.state !== 'running') return;
+  const t = ac.currentTime + 0.1;
+  tone(mtof(26), [[1, 1], [2, 0.6], [3, 0.25]], 0.07, t, 7, 10, 5, -0.3);
+  tone(mtof(45), [[1, 1], [2, 0.3]], 0.035, t, 9, 9, 5, 0.3);
+}
+
+// a deeper drone that runs under the voyage; level 0 (off) to 1
+let travel = null;
+function setTravel(level) {
+  if (!ac) return;
+  if (!travel) {
+    travel = gain(0);
+    travel.connect(padBus);
+    // two sub-bass notes a fifth apart, each beating slowly against a twin
+    [[26, 0], [26, 0.21], [33, 0], [33, 0.33], [38, 0.17]].forEach(([m, offset]) => {
+      const o = ac.createOscillator();
+      o.frequency.value = mtof(m) + offset;
+      o.connect(gain(m < 30 ? 0.5 : 0.3)).connect(travel);
+      o.start();
+    });
+    lfo(0.017, 0.02, travel.gain);
+  }
+  travel.gain.setTargetAtTime(level * 0.1, ac.currentTime, 5);
+}
+
+return { start, meteor, chime, swell, setTravel, setVolume, setNature, setMuted };
 })();
