@@ -3,14 +3,16 @@
 Run it (or double-click "Start Khonshu.bat"), and the sky opens in your browser. The address
 for the phone remote is printed below and shown in the sky's control panel.
 
-    python khonshu_server.py [--no-browser] [--local] [--port 8765]
+    python khonshu_server.py [--kiosk] [--no-browser] [--local] [--port 8765]
 
+--kiosk opens the sky fullscreen with the music already playing ("Khonshu Bedtime.bat").
 --local keeps it on this computer only (no phone remote).
 """
 import argparse
 import json
 import os
 import socket
+import subprocess
 import threading
 import webbrowser
 from functools import partial
@@ -110,10 +112,30 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_error(404)
 
 
+def open_kiosk(url):
+    """Open the sky fullscreen in Edge or Chrome, allowed to play sound without a click.
+
+    Browsers only honour those switches when starting fresh, so it gets a profile of its own.
+    Returns False if neither browser is installed in the usual place.
+    """
+    programs = (r'Microsoft\Edge\Application\msedge.exe', r'Google\Chrome\Application\chrome.exe')
+    folders = [os.environ.get(name) for name in ('PROGRAMFILES(X86)', 'PROGRAMFILES', 'LOCALAPPDATA')]
+    browser = next((path for folder in folders if folder for program in programs
+                    if os.path.isfile(path := os.path.join(folder, program))), None)
+    if not browser:
+        return False
+    profile = os.path.join(os.environ.get('LOCALAPPDATA') or ROOT, 'Khonshu', 'browser')
+    subprocess.Popen([browser, '--kiosk', url + '?autostart=1', '--edge-kiosk-type=fullscreen',
+                      '--autoplay-policy=no-user-gesture-required', '--no-first-run',
+                      '--user-data-dir=' + profile])
+    return True
+
+
 def main():
     global remote_url
     parser = argparse.ArgumentParser(description='Serve the Khonshu night sky and its phone remote.')
     parser.add_argument('--port', type=int, default=8765)
+    parser.add_argument('--kiosk', action='store_true', help='open fullscreen with the music already playing')
     parser.add_argument('--local', action='store_true', help='this computer only, no phone remote')
     parser.add_argument('--no-browser', action='store_true', help='do not open the sky in a browser')
     args = parser.parse_args()
@@ -126,7 +148,9 @@ def main():
         print('Phone remote (same Wi-Fi):', remote_url)
         print('If the phone cannot connect, allow Python through Windows Firewall for private networks.')
     print('Leave this window open. Press Ctrl+C to stop.')
-    if not args.no_browser:
+    if args.kiosk and open_kiosk(sky):
+        print('Opened fullscreen. Press Alt+F4 on the sky to close it.')
+    elif not args.no_browser:
         webbrowser.open(sky)
     try:
         server.serve_forever()

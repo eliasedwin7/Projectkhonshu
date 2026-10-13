@@ -7,16 +7,30 @@ const { RAD, sind, cosd, clamp, dot, cross, norm, apply, mul3, toVec } = Astro;
 
 // ───────────────────────── settings ─────────────────────────
 // Default location is Canberra. Tilt 90 = looking straight up (ceiling); "facing" is the
-// compass direction at the bottom edge of the picture. Constellation lines and names show
-// while the mouse is moving; "lines" and "names" pin them on permanently.
+// compass direction at the bottom edge of the picture. Constellation lines and names
+// show only when their explicit toggles are enabled.
 // "aurora" is how strong a display to show regardless of the real storm level (0 = real storms only).
-const DEFAULTS = {
-  meteors: 3, volume: 60, brightness: 100, darkness: 90, clouds: 15, fov: 100, tilt: 90, facing: 180, moon: 3,
-  aurora: 65, lat: -35.28, lon: 149.13, lines: false, names: false, daylight: true, online: true, mirror: false,
-  sounds: false,
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+// "realMeteors" replaces the meteor slider with the rate a real night would give.
+const PRESETS = {
+  real: { motion: reducedMotion ? 0 : 25, aurora: 0, moon: 1, meteors: 0.2, realMeteors: true, clouds: 15, daylight: true, sounds: false, brightness: 100 },
+  dreamy: { motion: reducedMotion ? 0 : 70, aurora: 65, moon: 3, meteors: 3, realMeteors: false, clouds: 15, daylight: false, sounds: false, brightness: 100 },
+  sleep: { motion: reducedMotion ? 0 : 10, aurora: 0, moon: 1, meteors: 0, realMeteors: false, clouds: 20, daylight: false, sounds: false, brightness: 60, volume: 30 },
 };
-const STORE_KEY = 'khonshu-settings-v4';
-const settings = Object.assign({}, DEFAULTS, loadJSON(STORE_KEY) || {});
+// "quality" is 0–2 (low to high). "nature" is the level of the night sounds. "alarm" is a wake
+// time as HH:MM, or empty. "weather" matches the clouds to the real sky at the chosen place.
+const DEFAULTS = {
+  meteors: 0.2, volume: 60, brightness: 100, darkness: 90, clouds: 15, fov: 100, tilt: 90, facing: 180, moon: 1,
+  aurora: 0, lat: -35.28, lon: 149.13, lines: false, names: false, daylight: true, online: true, mirror: false,
+  sounds: false, audio: true, autoMenu: true, motion: reducedMotion ? 0 : 25, style: 'real',
+  realMeteors: true, quality: 2, nature: 20, culture: 'western', alarm: '', issAlert: true, weather: false,
+};
+const STORE_KEY = 'khonshu-settings-v5';
+const savedSettings = loadJSON(STORE_KEY);
+const settings = Object.assign({}, DEFAULTS, savedSettings || loadJSON('khonshu-settings-v4') || {});
+// Adopt the requested realistic appearance once, preserving location, projector
+// alignment, music volume and other preferences from the previous version.
+if (!savedSettings) { Object.assign(settings, PRESETS.real, { style: 'real' }); saveJSON(STORE_KEY, settings); }
 const SPEEDS = [1, 10, 60, 600, 3600], SPEED_LABELS = ['live', '10×', '1 min/s', '10 min/s', '1 h/s'];
 let speedIdx = 0, timeOffset = 0, simTime = Date.now();
 
@@ -142,11 +156,31 @@ const TWILIGHT_LIMIT = [[-18, 8.2], [-12, 5.5], [-9, 4], [-6, 2], [-3, 0], [0, -
 const TWILIGHT_SKY = [[-18, [0, 0, 0]], [-12, [3, 5, 14]], [-6, [13, 24, 52]], [-3, [28, 48, 92]],
                       [0, [58, 92, 150]], [6, [92, 140, 205]], [20, [105, 160, 228]], [90, [110, 168, 235]]];
 const TWILIGHT_GLOW = [[-18, 0], [-10, 0.25], [-4, 0.6], [0, 0.75], [6, 0.5], [15, 0.35], [90, 0.3]];
-const env = { sun: Astro.sun(0), sunEnu: [0, 0, -1], trueSunAlt: -90, sunAlt: -90, night: 1, limMag: 7.5, mw: 1, glare: 0, bg: [0, 0, 0], bgCss: '#000' };
+const env = { sun: Astro.sun(0), sunEnu: [0, 0, -1], trueSunAlt: -90, sunAlt: -90, dawn: null, night: 1, limMag: 7.5, mw: 1, glare: 0, bg: [0, 0, 0], bgCss: '#000' };
+
+// Sunrise alarm: over the 25 minutes before the wake time the sky runs through dawn whatever the
+// real Sun is doing, then stays light for half an hour. Returns 0 → 1 during that dawn, else null.
+const DAWN_MS = 25 * 60000;
+function alarmProgress() {
+  if (!settings.alarm) return null;
+  const [hours, minutes] = settings.alarm.split(':').map(Number), now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes).getTime();
+  for (const at of [today, today + 86400000]) {   // tomorrow's, for an alarm just after midnight
+    const p = (now.getTime() - (at - DAWN_MS)) / DAWN_MS;
+    if (p >= 0 && p < 2.2) return Math.min(1, p);
+  }
+  return null;
+}
 
 function updateEnvironment() {
   env.trueSunAlt = Math.asin(env.sunEnu[2]) / RAD;
   env.sunAlt = settings.daylight ? env.trueSunAlt : -90;
+  env.dawn = alarmProgress();
+  if (env.dawn !== null && -18 + 26 * env.dawn > env.sunAlt) {
+    // an artificial Sun coming up in the east
+    env.sunAlt = -18 + 26 * env.dawn;
+    env.sunEnu = altAz(95, env.sunAlt);
+  }
   const dark = settings.darkness / 100;
   env.glare = (1 - dark) ** 2;   // city glow, 0 in the outback
   env.limMag = Math.min(ramp(TWILIGHT_LIMIT, env.sunAlt), 3.4 + 4.8 * dark - 2.2 * moon.glow);
@@ -259,6 +293,20 @@ const fireSprite = buildSprite([150, 255, 200]);
 const blobs = { blue: buildBlob([165, 178, 215]), white: buildBlob([200, 205, 222]), warm: buildBlob([222, 210, 192]), pink: buildBlob([255, 150, 172]), sunset: buildBlob([255, 150, 70]) };
 for (const p of Astro.PLANETS) p.sprite = buildSprite(p.color);
 
+// The Aboriginal sky from js/skylore.js, turned into directions: star names, labelled places,
+// and figures drawn as chains of points.
+const lore = typeof SKY_LORE === 'undefined' ? null : (() => {
+  const figures = SKY_LORE.figures.map(f => ({
+    name: f.name, people: f.people, note: f.note,
+    v: f.outline ? Astro.galactic(...f.label) : toVec(...f.label),
+    chains: f.outline ? [f.outline.concat([f.outline[0]]).map(([l, b]) => Astro.galactic(l, b))]
+      : f.lines.map(line => line.map(([ra, dec]) => toVec(ra, dec))),
+  }));
+  const places = SKY_LORE.places.map(([name, ra, dec, note, people]) => ({ name, v: toVec(ra, dec), note, people }));
+  return { stars: SKY_LORE.stars, people: SKY_LORE.people, figures, labels: [...figures, ...places] };
+})();
+const aboriginal = () => settings.culture === 'aboriginal' && lore;
+
 // Deep-sky objects you can pick out without a telescope: name, RA, Dec, width in degrees,
 // glow strength (0 = label only), tint, kind, distance and a note for the info card.
 const DEEP_SKY = [
@@ -365,7 +413,8 @@ function createShaderLayer(body, downscale) {
     // rot takes directions to the camera, as a row-major matrix; GL reads it as columns, which
     // is the inverse rotation the shader needs to go from a pixel back to a direction
     draw(rot) {
-      const w = Math.ceil(W / downscale), h = Math.ceil(H / downscale), q = w / W;
+      const shrink = downscale[settings.quality];   // one value per quality level
+      const w = Math.ceil(W / shrink), h = Math.ceil(H / shrink), q = w / W;
       if (c.width !== w || c.height !== h) { c.width = w; c.height = h; gl.viewport(0, 0, w, h); }
       gl.uniformMatrix3fv(uniform('uRot'), false, rot);
       gl.uniform2f(uniform('uCentre'), view.cx * q, h - view.cy * q);
@@ -388,10 +437,13 @@ const milkyWayPhoto = IMAGES && IMAGES.milkyWay ? createShaderLayer(`
     // the map is centred on RA 0 with RA increasing to the left, north at the top
     vec2 uv = vec2(0.5 - atan(e.y, e.x) / 6.2831853, 0.5 - asin(clamp(e.z, -1.0, 1.0)) / 3.14159265);
     vec3 c = texture2D(uTex, uv).rgb;
-    c = mix(vec3(dot(c, vec3(0.3, 0.59, 0.11))), c, 0.7);          // a little paler than the photograph
-    c = pow(max(c - 0.12, 0.0) * 1.14, vec3(1.5));                 // drop the all-sky haze, keep the band
+    // The photographic map is much more colourful and contrasty than a visual
+    // night sky. Compress its highlights into a faint, mostly grey band.
+    c = mix(vec3(dot(c, vec3(0.3, 0.59, 0.11))), c, 0.12);
+    c = pow(max(c - 0.08, 0.0), vec3(1.1));
+    c = c / (vec3(1.0) + c * 2.5);
     gl_FragColor = vec4(c * uGain * fade, 1.0);
-  }`, 1.5) : null;
+  }`, [3, 2, 1.5]) : null;
 if (milkyWayPhoto) {
   const img = new Image(), gl = milkyWayPhoto.gl;
   img.onload = () => {
@@ -486,10 +538,10 @@ function drawMilkyWay() {
   if (env.mw < 0.02) return;
   if (milkyWayPhoto && milkyWayPhoto.ready) {
     milkyWayPhoto.set('uUp', view.HP[6], view.HP[7], view.HP[8]);
-    milkyWayPhoto.set('uGain', 1.2 * env.mw);
+    milkyWayPhoto.set('uGain', 0.28 * env.mw);
     milkyWayPhoto.draw(view.C);
   } else {
-    drawMilkyWayBlobs(env.mw);
+    drawMilkyWayBlobs(0.3 * env.mw);
   }
 }
 
@@ -749,13 +801,12 @@ function spawnSatellite(now) {
 // The Aurora setting adds a display on top of that, so there is something to see on a quiet night.
 const aurora = { level: 0, kp: 0, live: 0 };
 
-// The shader walks each line of sight up through the layer where aurora glows (95–310 km on a
-// round Earth) and adds up the light of thin, folded, rippling sheets standing over the ground
-// toward the pole. Because the sheets are defined on the ground and only their brightness changes
-// with height, perspective produces the tall rays and the fan overhead by itself. Colours follow
-// the real emissions: a purple nitrogen fringe at the foot, oxygen green, oxygen red at the top.
+// Integrate light through two finite, folded curtains at 95–310 km altitude.
+// Ray brightness stays coherent up each curtain, with a green lower section,
+// faint red above it and a trace of violet at the foot. Strong displays move
+// overhead; weaker displays stay toward the pole. Nothing follows screen edges.
 const auroraLayer = createShaderLayer(`
-  uniform float uTime, uLevel, uPole, uGain;
+  uniform float uTime, uLevel, uPole, uGain, uSteps;
   float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
   float noise(vec2 p) {
     vec2 i = floor(p), f = fract(p);
@@ -763,17 +814,27 @@ const auroraLayer = createShaderLayer(`
     return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
   }
   float fbm(vec2 p) { return 0.6 * noise(p) + 0.28 * noise(p * 2.1 + 13.0) + 0.12 * noise(p * 4.3 + 31.0); }
-  // brightness of the sheets above a spot on the ground: x km east, y km toward the pole
-  float sheets(vec2 g) {
-    float across = g.y + 280.0 * (fbm(vec2(g.x / 650.0 + uTime * 0.004, 3.0)) - 0.5);   // the band meanders
-    float d = across - mix(950.0, 170.0, uLevel);                                        // and comes overhead in a storm
-    float band = exp(-d * d / 135000.0);
-    float fold = d / 120.0 + 2.2 * fbm(vec2(g.x / 190.0 - uTime * 0.012, across / 420.0 + uTime * 0.003));
-    float sheet = pow(1.0 - abs(fract(fold) - 0.5) * 2.0, 7.0);
-    float rays = noise(vec2(g.x / 7.0 + uTime * 0.22, across / 95.0));
-    rays = 0.25 + 0.75 * rays * rays * 2.0;
-    float patch = smoothstep(0.22, 0.6, fbm(vec2(g.x / 430.0 + uTime * 0.006, across / 520.0 - uTime * 0.004)));
-    return band * sheet * rays * patch;
+  // x km east, y km poleward, h km above the ground. Each curtain has a
+  // distinct path and finite ends, rather than repeating stripes across an oval.
+  float curtain(vec2 g, float h, float id) {
+    float x = g.x + (id - 0.4) * 150.0;
+    float travel = uTime * 0.018;
+    float fold = 43.0 * sin(x * 0.013 + travel + id * 2.0)
+      + 18.0 * sin(x * 0.031 - travel * 0.7 + id)
+      + 52.0 * (noise(vec2(x / 130.0 - uTime * 0.007, id + 4.0)) - 0.5);
+    float reach = mix(720.0, -30.0, smoothstep(0.15, 0.8, uLevel));
+    float path = reach + id * 105.0 + x * x * 0.00022 + fold;
+    // A small magnetic-field inclination keeps the rays aligned through height.
+    float distance = g.y - (h - 110.0) * 0.16 - path;
+    float thickness = 5.5 + 3.5 * noise(vec2(x / 75.0, id + 8.0));
+    float sheet = exp(-distance * distance / (2.0 * thickness * thickness));
+    float ends = exp(-pow(abs(x) / (210.0 + 90.0 * uLevel), 4.0));
+    float rays = noise(vec2(x / 3.8 + uTime * 0.045, id + 11.0));
+    rays = 0.12 + 1.7 * rays * rays * rays;
+    float patch = smoothstep(0.22, 0.72, noise(vec2(x / 90.0 - uTime * 0.012, id + 17.0)));
+    float top = 205.0 + 90.0 * noise(vec2(x / 115.0 + uTime * 0.004, id + 21.0));
+    float heightFade = 1.0 - smoothstep(top - 45.0, top + 25.0, h);
+    return sheet * ends * rays * (0.25 + 0.75 * patch) * heightFade;
   }
   void main() {
     vec3 e = direction();   // east, north, up
@@ -782,15 +843,22 @@ const auroraLayer = createShaderLayer(`
     float jitter = hash(gl_FragCoord.xy);   // hides the steps between samples without flickering
     vec3 sum = vec3(0.0);
     for (int i = 0; i < 40; i++) {
-      float h = 95.0 + 215.0 * (float(i) + jitter) / 40.0;
+      if (float(i) >= uSteps) break;   // fewer samples at lower quality
+      float h = 95.0 + 215.0 * (float(i) + jitter) / uSteps;
       float root = sqrt(R * R * e.z * e.z + 2.0 * R * h + h * h), t = root - R * e.z;   // distance to that height
-      float profile = smoothstep(95.0, 108.0, h) * exp(-(h - 108.0) / 65.0);
-      vec3 tint = mix(vec3(0.22, 1.0, 0.42), vec3(0.95, 0.16, 0.3), smoothstep(150.0, 260.0, h));
-      tint = mix(vec3(0.7, 0.28, 0.85), tint, smoothstep(96.0, 113.0, h));
-      sum += sheets(vec2(e.x, e.y * uPole) * t) * profile * tint * min((R + h) / root, 6.0);   // slanted paths cross more glow
+      float green = exp(-pow((h - 135.0) / 45.0, 2.0)) * smoothstep(95.0, 108.0, h);
+      float red = 0.2 * exp(-pow((h - 240.0) / 70.0, 2.0));
+      float violet = 0.035 * exp(-pow((h - 103.0) / 9.0, 2.0));
+      vec3 emission = vec3(0.16, 0.82, 0.32) * green
+        + vec3(0.7, 0.08, 0.13) * red + vec3(0.42, 0.12, 0.6) * violet;
+      vec2 ground = vec2(e.x, e.y * uPole) * t;
+      float light = curtain(ground, h, 0.0) + 0.55 * curtain(ground, h, 1.0);
+      sum += light * emission * min((R + h) / root, 4.0);
     }
-    gl_FragColor = vec4(sum * uGain * 0.2 * smoothstep(0.0, 0.14, e.z), 1.0);
-  }`, 4);
+    vec3 colour = sum * (40.0 / uSteps) * uGain * 0.13 * smoothstep(0.0, 0.16, e.z);
+    colour = colour / (vec3(1.0) + colour);   // preserve detail in overlapping rays
+    gl_FragColor = vec4(colour, 1.0);
+  }`, [6, 4, 3]);
 
 function updateAurora(dt) {
   const needed = (61.5 - Math.abs(Astro.geomagneticLatitude(settings.lat, settings.lon))) / 2.2;
@@ -805,29 +873,31 @@ function drawAurora(t) {
     auroraLayer.set('uTime', t % 100000);
     auroraLayer.set('uLevel', aurora.level);
     auroraLayer.set('uPole', settings.lat < 0 ? -1 : 1);
-    auroraLayer.set('uGain', env.night * (0.6 + 0.8 * aurora.level));
+    auroraLayer.set('uGain', strength * 0.85);
+    auroraLayer.set('uSteps', [20, 30, 40][settings.quality]);
     auroraLayer.draw(view.V);
     return;
   }
-  // no WebGL: plain curtains of rays toward the nearer pole, green low down fading to red
-  const centre = settings.lat < 0 ? 180 : 0, COUNT = 80, SPAN = 120;
+  // Without WebGL, use finite, uneven curtains projected into the same local sky.
+  const centre = settings.lat < 0 ? 180 : 0, COUNT = 150, SPAN = 105;
   ctx.lineCap = 'butt'; ctx.globalAlpha = 1;
-  ctx.lineWidth = SPAN / COUNT * RAD * view.s * 2.2;
+  ctx.lineWidth = Math.max(unit, SPAN / COUNT * RAD * view.s * 0.9);
   for (let i = 0; i < COUNT; i++) {
     const f = i / (COUNT - 1) - 0.5;
-    const wave = Math.sin(i * 0.37 + t * 0.21) + Math.sin(i * 0.11 - t * 0.13 + 2) + 0.6 * Math.sin(i * 0.9 + t * 0.5);
-    const a = strength * clamp(0.35 + 0.3 * wave, 0, 1) * Math.max(0, 1 - Math.abs(f) * 1.7);
+    const wave = Math.sin(i * 0.37 + t * 0.12) + Math.sin(i * 0.11 - t * 0.045 + 2) + 0.6 * Math.sin(i * 0.9 + t * 0.16);
+    const patch = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(i * 0.055 - t * 0.025));
+    const a = strength * 0.7 * clamp(0.35 + 0.3 * wave, 0, 1) * patch * Math.exp(-((f / 0.37) ** 4));
     if (a < 0.02) continue;
-    const base = 5 + 4 * Math.sin(i * 0.15 + t * 0.05);
-    const top = base + (10 + 42 * aurora.level) * (0.65 + 0.35 * Math.sin(i * 0.23 + t * 0.17));
+    const base = 6 + 64 * aurora.level ** 1.7 + 6 * Math.sin(i * 0.075 + t * 0.03);
+    const top = Math.min(88, base + 14 + 22 * (0.5 + 0.5 * Math.sin(i * 0.09 - t * 0.04)));
     if (!projectEnu(altAz(centre + f * SPAN, base))) continue;
     const x0 = pt.x, y0 = pt.y;
     if (!projectEnu(altAz(centre + f * SPAN, top))) continue;
     const ray = ctx.createLinearGradient(x0, y0, pt.x, pt.y);
     ray.addColorStop(0, 'rgba(110,255,150,0)');
-    ray.addColorStop(0.1, `rgba(110,255,150,${a})`);
-    ray.addColorStop(0.5, `rgba(90,230,170,${a * 0.5})`);
-    ray.addColorStop(0.8, `rgba(210,90,140,${a * 0.25})`);
+    ray.addColorStop(0.12, `rgba(90,220,130,${a})`);
+    ray.addColorStop(0.45, `rgba(70,190,125,${a * 0.4})`);
+    ray.addColorStop(0.8, `rgba(190,60,90,${a * 0.12})`);
     ray.addColorStop(1, 'rgba(210,90,140,0)');
     ctx.strokeStyle = ray;
     ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(pt.x, pt.y); ctx.stroke();
@@ -835,14 +905,16 @@ function drawAurora(t) {
 }
 
 // ───────────────────────── clouds ─────────────────────────
-// One tileable noise field, thresholded by the cloud setting and drifted across in two layers.
+// Two noise fields evolve through each other. Local warping makes wisps grow
+// and dissolve while two sheets advect them at different speeds.
 const CLOUD_SIZE = 256;
 const cloudTile = document.createElement('canvas'), cloudLayer = document.createElement('canvas');
 const cloudCtx = cloudLayer.getContext('2d');
 cloudTile.width = cloudTile.height = CLOUD_SIZE;
-let cloudPattern = null;
+let cloudPattern = null, lastCloudBake = -Infinity;
+let cloudThreshold = 0.6;
 
-const cloudNoise = (() => {
+function makeCloudNoise() {
   const N = CLOUD_SIZE, out = new Float32Array(N * N), fade = t => t * t * (3 - 2 * t);
   let total = 0;
   for (let octave = 0, cells = 3, amp = 0.5; octave < 6; octave++, cells *= 2, amp *= 0.58) {
@@ -858,41 +930,81 @@ const cloudNoise = (() => {
     total += amp;
   }
   return out.map(v => v / total);
-})();
+}
+const cloudNoise = makeCloudNoise(), cloudDetail = makeCloudNoise();
+const cloudDistribution = Float32Array.from(cloudNoise, (v, i) => 0.7 * v + 0.3 * cloudDetail[i]).sort();
 
-function bakeClouds() {
+function sampleCloud(field, x, y) {
+  const N = CLOUD_SIZE;
+  x = ((x % N) + N) % N; y = ((y % N) + N) % N;
+  const ix = Math.floor(x), iy = Math.floor(y), u = x - ix, v = y - iy;
+  const x1 = (ix + 1) % N, y1 = (iy + 1) % N;
+  const a = field[iy * N + ix], b = field[iy * N + x1];
+  const c = field[y1 * N + ix], d = field[y1 * N + x1];
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+
+// Cloud cover as a percentage: the slider, or the real sky when "Real clouds" has a reading.
+const weather = { cover: null };
+function cloudCover() {
+  return settings.weather && weather.cover !== null && Math.abs(timeOffset) < 3600000 ? weather.cover : settings.clouds;
+}
+
+function bakeClouds(t = nowSec(), updateCover = true) {
+  if (updateCover) {
+    const cover = cloudCover() / 100;
+    cloudThreshold = cloudDistribution[Math.min(cloudDistribution.length - 1,
+      Math.floor((1 - cover) * (cloudDistribution.length - 1)))];
+  }
   const g = cloudTile.getContext('2d'), img = g.createImageData(CLOUD_SIZE, CLOUD_SIZE), d = img.data;
-  const threshold = 0.72 - 0.5 * settings.clouds / 100;
-  for (let i = 0; i < cloudNoise.length; i++) {
-    const t = clamp((cloudNoise[i] - threshold) / 0.16, 0, 1);
-    d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = 255;
-    d[i * 4 + 3] = t * t * (3 - 2 * t) * 235;
+  const life = settings.motion / 100;
+  const phase = t * (0.025 + 0.035 * life);
+  for (let y = 0; y < CLOUD_SIZE; y++) {
+    for (let x = 0; x < CLOUD_SIZE; x++) {
+      const i = (y * CLOUD_SIZE + x) * 4;
+      const wx = 9 * Math.sin(y * 0.024 + phase) + 4 * Math.sin(x * 0.037 - phase * 0.7);
+      const wy = 6 * Math.sin(x * 0.026 - phase * 0.8);
+      const density = 0.7 * sampleCloud(cloudNoise, x + wx, y + wy)
+        + 0.3 * sampleCloud(cloudDetail, x - t * (0.3 + 0.4 * life), y + t * 0.16);
+      const opacity = clamp((density - cloudThreshold + 0.025) / 0.14, 0, 1);
+      d[i] = d[i + 1] = d[i + 2] = 255;
+      d[i + 3] = opacity * opacity * (3 - 2 * opacity) * 235;
+    }
   }
   g.putImageData(img, 0, 0);
   cloudPattern = cloudCtx.createPattern(cloudTile, 'repeat');
+  lastCloudBake = t;
 }
 
 function drawClouds(t) {
-  if (!settings.clouds || !cloudPattern) return;
+  if (!cloudCover() || !cloudPattern) return;
+  // Slow shape evolution needs only four texture updates per second; the
+  // separate wind transforms still move smoothly on every animation frame.
+  if (t - lastCloudBake >= 0.25) bakeClouds(t, false);
   const q = cloudLayer.width / W, w = cloudLayer.width, h = cloudLayer.height;
   cloudCtx.globalCompositeOperation = 'source-over';
   cloudCtx.clearRect(0, 0, w, h);
+  const life = settings.motion / 100, drift = 0.7 + 1.8 * life;
   for (const [scale, vx, vy, alpha] of [[5, 5, 1.5, 1], [3.1, -3, 2.2, 0.6]]) {
     // stretched sideways, like sheets of cloud seen from below
-    cloudPattern.setTransform(new DOMMatrix().translate(t * vx * unit * q, t * vy * unit * q).scale(scale * unit * q * 1.7, scale * unit * q));
+    // Each sheet drifts and gently changes shape at its own pace.
+    const stretch = 1 + 0.035 * Math.sin(t * 0.045 + scale);
+    cloudPattern.setTransform(new DOMMatrix()
+      .translate(t * vx * drift * unit * q, t * vy * drift * unit * q)
+      .scale(scale * unit * q * 1.7 * stretch, scale * unit * q / stretch));
     cloudCtx.globalAlpha = alpha; cloudCtx.fillStyle = cloudPattern;
     cloudCtx.fillRect(0, 0, w, h);
   }
   // at night clouds are dark shapes that blot out the stars, lit only by the Moon and the city;
   // by day they are white, with a warm tint around sunrise and sunset
   const day = clamp((env.sunAlt + 8) / 14, 0, 1), warm = day * (1 - day) * 2, m = moon.glow, g = env.glare;
-  const colour = [10 + 26 * m + 46 * g, 11 + 28 * m + 36 * g, 15 + 34 * m + 28 * g]
+  const colour = [3 + 26 * m + 46 * g, 4 + 28 * m + 36 * g, 6 + 34 * m + 28 * g]
     .map((v, k) => Math.round(clamp(v + (([236, 239, 245][k]) - v) * day + [40, 0, -30][k] * warm, 0, 255)));
   cloudCtx.globalCompositeOperation = 'source-in';
   cloudCtx.globalAlpha = 1; cloudCtx.fillStyle = `rgb(${colour})`;
   cloudCtx.fillRect(0, 0, w, h);
   ctx.globalCompositeOperation = 'source-over';
-  ctx.globalAlpha = 0.92 * (0.75 + 0.25 * Math.sin(t / 97));
+  ctx.globalAlpha = 0.92;
   ctx.drawImage(cloudLayer, 0, 0, W, H);
 }
 
@@ -900,19 +1012,29 @@ function drawClouds(t) {
 const METEOR_TINTS = [[255,255,255], [205,225,255], [190,255,222], [255,236,192]];
 const meteors = [];
 const radiant = { x: 0, y: 0, until: 0, away: true };   // made-up radiant for the Meteor shower button
-let nextMeteor = 3, showerUntil = 0;
+let nextMeteor = Infinity, showerUntil = 0;
 
-// Real annual showers: name, peak month and day, days active either side, radiant RA and Dec.
+// Real annual showers: name, peak month and day, days active either side, radiant RA and Dec,
+// and the hourly rate at the peak for a perfect sky with the radiant overhead.
 const SHOWERS = [
-  ['Quadrantids', 1, 3, 3, 230, 49], ['Lyrids', 4, 22, 4, 271, 34], ['Eta Aquariids', 5, 6, 10, 338, -1],
-  ['Delta Aquariids', 7, 30, 12, 340, -16], ['Perseids', 8, 12, 10, 48, 58], ['Orionids', 10, 21, 12, 95, 16],
-  ['Leonids', 11, 17, 6, 152, 22], ['Geminids', 12, 14, 7, 112, 33],
-].map(([name, month, day, span, ra, dec]) => ({ name, month, day, span, v: toVec(ra, dec) }));
-let shower = null;
+  ['Quadrantids', 1, 3, 3, 230, 49, 110], ['Lyrids', 4, 22, 4, 271, 34, 18], ['Eta Aquariids', 5, 6, 10, 338, -1, 50],
+  ['Delta Aquariids', 7, 30, 12, 340, -16, 25], ['Perseids', 8, 12, 10, 48, 58, 100], ['Orionids', 10, 21, 12, 95, 16, 20],
+  ['Leonids', 11, 17, 6, 152, 22, 15], ['Geminids', 12, 14, 7, 112, 33, 150],
+].map(([name, month, day, span, ra, dec, peak]) => ({ name, month, day, span, peak, v: toVec(ra, dec) }));
+let shower = null, realMeteorRate = 0;   // per minute
 
 function updateShower() {
   const year = new Date(simTime).getUTCFullYear();
   shower = SHOWERS.find(s => Math.abs(simTime - Date.UTC(year, s.month - 1, s.day)) < s.span * 86400000) || null;
+  // What a real night gives: about eight stray meteors an hour, plus the shower, which fades
+  // away from its peak date and counts for less while its radiant is low.
+  let perHour = 8;
+  if (shower) {
+    const daysOff = Math.abs(simTime - Date.UTC(year, shower.month - 1, shower.day)) / 86400000;
+    perHour += shower.peak * Math.exp(-daysOff / (shower.span / 3)) * Math.max(0, dot(view.HP.slice(6), shower.v));
+  }
+  // fewer are caught through a small window of sky, or from a bright site
+  realMeteorRate = perHour / 60 * Math.min(1, (settings.fov / 160) ** 2) * Math.pow(2.5, Math.min(0, env.limMag - 6.5));
 }
 // where tonight's shower appears to come from on screen, if its radiant is above the horizon
 function showerRadiant() {
@@ -934,7 +1056,8 @@ function pickRadiant(now) {
 }
 
 function meteorRate(now) {
-  return now < showerUntil ? Math.max(settings.meteors, 6) * 10 : settings.meteors;
+  if (now < showerUntil) return Math.max(settings.meteors, 6) * 10;
+  return settings.realMeteors ? realMeteorRate : settings.meteors;
 }
 function scheduleMeteor(now) {
   const rate = meteorRate(now);
@@ -943,7 +1066,7 @@ function scheduleMeteor(now) {
 
 function spawnMeteor(now, opts = {}) {
   const diag = Math.hypot(W, H);
-  const fire = opts.fireball ?? Math.random() < 0.04;
+  const fire = opts.fireball ?? Math.random() < 0.005;
   const x0 = W * (0.05 + Math.random() * 0.9), y0 = H * (0.05 + Math.random() * 0.9);
   const real = showerRadiant();
   let ang, scale = 1;
@@ -1013,7 +1136,25 @@ function drawMeteor(m, now, dim) {
 }
 
 // ───────────────────────── stars, planets, guide ─────────────────────────
+function drawLoreFigures(alpha) {
+  ctx.lineWidth = Math.max(1, 1.3 * unit); ctx.lineCap = ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#e0a868'; ctx.globalAlpha = 0.5 * alpha;
+  ctx.beginPath();
+  for (const figure of lore.figures) {
+    for (const chain of figure.chains) {
+      let pen = false;
+      for (const v of chain) {
+        const shown = projectSky(v) && pt.up > 0.02;
+        if (shown && pen) ctx.lineTo(pt.x, pt.y); else if (shown) ctx.moveTo(pt.x, pt.y);
+        pen = shown;
+      }
+    }
+  }
+  ctx.stroke();
+}
+
 function drawLines(alpha) {
+  if (aboriginal()) { drawLoreFigures(alpha); return; }
   const C = view.C, Hm = view.HP, s = view.s, cx = view.cx, cy = view.cy, zMin = view.zMin, gap = 7 * unit;
   ctx.lineWidth = Math.max(1, 1.1 * unit); ctx.lineCap = 'round';
   ctx.strokeStyle = '#6f8fff'; ctx.globalAlpha = 0.32 * alpha;
@@ -1040,15 +1181,23 @@ function drawLines(alpha) {
 
 function drawDim(t) {
   const C = view.C, Hm = view.HP, s = view.s, cx = view.cx, cy = view.cy, zMin = view.zMin, margin = 4 * unit;
+  // low quality draws half of the generated background stars
+  const limit = (dimCat + GENERATED_STARS * (settings.quality ? 1 : 0.5)) * 3;
   for (let k = 0; k < dimBuckets.length; k++) {
     const idx = dimBuckets[k], level = Math.floor(k / PHASES), ph = k % PHASES, vis = visible(LEVEL_MAG[level]);
     if (vis < 0.02) continue;
     const size = LEVEL_SIZE[level] * unit, half = size / 2, round = size > 2.2, minUp = LEVEL_MIN_UP[level];
-    ctx.globalAlpha = LEVEL_ALPHA[level] * vis * (0.82 + 0.18 * Math.sin(t * (0.5 + 0.23 * ph) + ph * 1.7 + level));
+    const life = settings.motion / 100;
+    const shimmer = 0.65 * Math.sin(t * (0.5 + 0.23 * ph) + ph * 1.7 + level)
+      + 0.35 * Math.sin(t * (1.3 + 0.17 * level) + ph * 3.1);
+    const amplitude = 0.06 + 0.18 * life;
+    ctx.globalAlpha = LEVEL_ALPHA[level] * vis * (1 - amplitude + amplitude * shimmer);
     ctx.fillStyle = FAINT_TINTS[ph];
     ctx.beginPath();
     for (let j = 0; j < idx.length; j++) {
-      const i = idx[j] * 3, x = dimV[i], y = dimV[i + 1], z = dimV[i + 2];
+      const i = idx[j] * 3;
+      if (i >= limit) break;   // each bucket is in ascending order
+      const x = dimV[i], y = dimV[i + 1], z = dimV[i + 2];
       const dz = C[6] * x + C[7] * y + C[8] * z;
       if (dz < zMin || Hm[6] * x + Hm[7] * y + Hm[8] * z < minUp) continue;
       const kk = s * 2 / (1 + dz), px = cx + kk * (C[0] * x + C[1] * y + C[2] * z);
@@ -1076,7 +1225,8 @@ function drawBright(t) {
     const py = cy - kk * (C[3] * x + C[4] * y + C[5] * z);
     if (py < -margin || py > H + margin) continue;
     const b = SPRITE_MAG - catMag[i], air = airmass(up), f = catSpeed[i], ph = catPhase[i];
-    const amp = Math.min(0.5, 0.04 + 0.055 * (air - 1));
+    const life = settings.motion / 100;
+    const amp = Math.min(0.6, 0.04 + 0.2 * life + 0.055 * (air - 1));
     const flick = 0.5 * Math.sin(t * (9 + 5 * f) + ph) + 0.3 * Math.sin(t * (17 + 9 * f) + ph * 2.3)
       + 0.4 * Math.sin(t * (3.1 + f) + ph * 1.7);
     let tint = catTint[i];
@@ -1085,8 +1235,14 @@ function drawBright(t) {
       const c = Math.sin(t * (23 + 7 * f) + ph * 5);
       if (c > 0.72) tint = 2; else if (c < -0.72) tint = 5;
     }
-    const size = (5 + 7 * b) * unit * (1 + 0.3 * amp * flick);
-    ctx.globalAlpha = clamp((0.6 + 0.12 * b) * extinction(air) * (1 + amp * flick), 0, 1) * visible(catMag[i]);
+    // A slower, independent envelope makes scintillation readable on a ceiling.
+    // Keep room below full alpha so the brightest stars can visibly swell.
+    const slow = Math.sin(t * (0.7 + f * 0.35) + ph)
+      * Math.sin(t * (1.1 + f * 0.21) + ph * 2.7);
+    const scintillation = 1 + amp * (flick * (1 - 0.35 * life) + slow * life);
+    const size = (5 + 7 * b) * unit * (1 + 0.45 * amp * slow * life + 0.3 * amp * flick);
+    const base = Math.min(0.6 + 0.12 * b, 1 - 0.22 * life);
+    ctx.globalAlpha = clamp(base * extinction(air) * scintillation, 0, 1) * visible(catMag[i]);
     ctx.drawImage(sprites[tint], px - size / 2, py - size / 2, size, size);
   }
 }
@@ -1112,19 +1268,30 @@ function drawLabels(alpha) {
   const font = (size, weight = '') => { ctx.font = `${weight} ${Math.round(size * unit)}px "Segoe UI", system-ui, sans-serif`; };
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   font(10.5, '600'); setSpacing(2.5 * unit);
-  ctx.fillStyle = '#8fa9ff';
-  for (const L of labels) {
-    if (!projectSky(L.v) || pt.up < 0.03 || !onScreen(-60 * unit)) continue;
-    ctx.globalAlpha = alpha * (L.rank === 1 ? 0.62 : 0.44) * Math.min(1, pt.up / 0.15);
-    ctx.fillText(L.text, pt.x, pt.y);
+  const local = aboriginal();
+  if (local) {
+    ctx.fillStyle = '#e8b47a';
+    for (const item of lore.labels) {
+      if (!projectSky(item.v) || pt.up < 0.03 || !onScreen(-60 * unit)) continue;
+      ctx.globalAlpha = alpha * 0.62 * Math.min(1, pt.up / 0.15);
+      ctx.fillText(item.name.toUpperCase(), pt.x, pt.y);
+    }
+  } else {
+    ctx.fillStyle = '#8fa9ff';
+    for (const L of labels) {
+      if (!projectSky(L.v) || pt.up < 0.03 || !onScreen(-60 * unit)) continue;
+      ctx.globalAlpha = alpha * (L.rank === 1 ? 0.62 : 0.44) * Math.min(1, pt.up / 0.15);
+      ctx.fillText(L.text, pt.x, pt.y);
+    }
   }
   ctx.textAlign = 'left';
   font(10); setSpacing(0.6 * unit);
   ctx.fillStyle = '#d5dcf0';
   for (const [i, name] of starNames) {
-    if (catMag[i] > env.limMag || !projectSky(catV.subarray(i * 3, i * 3 + 3)) || pt.up < 0.03 || !onScreen(-20 * unit)) continue;
+    const shown = local ? (lore.stars[name] || [])[0] : name;   // only stars that have a name in that sky
+    if (!shown || catMag[i] > env.limMag || !projectSky(catV.subarray(i * 3, i * 3 + 3)) || pt.up < 0.03 || !onScreen(-20 * unit)) continue;
     ctx.globalAlpha = alpha * 0.55 * Math.min(1, pt.up / 0.15);
-    ctx.fillText(name, pt.x + 8 * unit, pt.y + 9 * unit);
+    ctx.fillText(shown, pt.x + 8 * unit, pt.y + 9 * unit);
   }
   ctx.fillStyle = '#9fd8d0';
   if (env.limMag > 4.6) {
@@ -1199,6 +1366,38 @@ function moonPhaseName() {
     : pct < 47 ? side + ' crescent' : pct > 53 ? side + ' gibbous' : moon.waxing ? 'first quarter' : 'last quarter';
 }
 
+// What the info card says about each kind of thing, and how to keep following it on screen.
+const skyPosition = v => () => projectSky(v) && pt.up > 0 ? [pt.x, pt.y] : null;
+const describeMoon = () => ({
+  title: 'Moon', radius: moon.r,
+  lines: [`${Math.round(moon.illum * 100)}% lit · ${moonPhaseName()}`, `${Math.round(moon.km).toLocaleString()} km away`,
+    moon.eclipsed > 0 ? 'Passing through Earth\'s shadow: a lunar eclipse.' : 'Earth\'s only natural satellite.'],
+  pos: () => moon.visible ? [moon.x, moon.y] : null,
+});
+const describeSatellite = s => ({
+  title: s.name, lines: [`${Math.round(s.range).toLocaleString()} km from you · ${Math.round(s.height)} km high`, s.note],
+  pos: () => s.fade > 0.05 && projectEnu(s.enu) ? [pt.x, pt.y] : null,
+});
+const describePlanet = p => ({
+  title: p.name, lines: [`Magnitude ${p.mag.toFixed(1)} · ${formatKm(p.dist * 149597871)} away`, PLANET_NOTES[p.name]],
+  pos: skyPosition(p.vec),
+});
+const describeDeepSky = o => ({
+  title: o.name, radius: projectSky(o.v) ? clamp(o.size * 0.5 * RAD * view.s * pt.k, 8 * unit, 60 * unit) : 0,
+  lines: [`${o.kind} · ${o.distance} away`, o.note], pos: skyPosition(o.v),
+});
+const describeLore = item => ({ title: item.name, lines: [item.note, 'From the sky of the ' + item.people + '.'], pos: skyPosition(item.v) });
+function describeStar(i) {
+  const name = starNames.get(i), facts = STAR_FACTS[name], local = aboriginal() && lore.stars[name];
+  return {
+    title: local ? `${local[0]} (${name})` : name || 'Star',
+    lines: [`Magnitude ${catMag[i].toFixed(1)} · ${COLOR_NAMES[catTint[i]]}`]
+      .concat(facts ? [`${facts[0].toLocaleString()} light-years away`, facts[1]] : [])
+      .concat(local ? [`${local[0]}: ${local[1]}. From the sky of the ${lore.people}.`] : []),
+    pos: skyPosition(catV.subarray(i * 3, i * 3 + 3)),
+  };
+}
+
 function identify(x, y) {
   const reach = 22 * unit;
   let best = null, bestDist = reach;
@@ -1207,50 +1406,68 @@ function identify(x, y) {
     const d = Math.hypot(px - x, py - y) - radius;
     if (d < bestDist) { bestDist = d; best = make; }
   };
-  if (moon.visible) {
-    consider(moon.x, moon.y, moon.r + 8 * unit, () => ({
-      title: 'Moon', radius: moon.r,
-      lines: [`${Math.round(moon.illum * 100)}% lit · ${moonPhaseName()}`, `${Math.round(moon.km).toLocaleString()} km away`,
-        moon.eclipsed > 0 ? 'Passing through Earth\'s shadow: a lunar eclipse.' : 'Earth\'s only natural satellite.'],
-      pos: () => moon.visible ? [moon.x, moon.y] : null,
-    }));
-  }
+  if (moon.visible) consider(moon.x, moon.y, moon.r + 8 * unit, describeMoon);
   for (const s of realSats) {
-    if (s.fade < 0.3 || !projectEnu(s.enu)) continue;
-    consider(pt.x, pt.y, 12 * unit, () => ({
-      title: s.name, lines: [`${Math.round(s.range).toLocaleString()} km from you · ${Math.round(s.height)} km high`, s.note],
-      pos: () => s.fade > 0.05 && projectEnu(s.enu) ? [pt.x, pt.y] : null,
-    }));
+    if (s.fade >= 0.3 && projectEnu(s.enu)) consider(pt.x, pt.y, 12 * unit, () => describeSatellite(s));
   }
   for (const p of Astro.PLANETS) {
-    if (p.up < 0 || p.mag > env.limMag || !projectSky(p.vec)) continue;
-    consider(pt.x, pt.y, 10 * unit, () => ({
-      title: p.name, lines: [`Magnitude ${p.mag.toFixed(1)} · ${formatKm(p.dist * 149597871)} away`, PLANET_NOTES[p.name]],
-      pos: () => projectSky(p.vec) && pt.up > 0 ? [pt.x, pt.y] : null,
-    }));
+    if (p.up >= 0 && p.mag <= env.limMag && projectSky(p.vec)) consider(pt.x, pt.y, 10 * unit, () => describePlanet(p));
   }
   if (env.limMag > 4.6) {
     for (const o of DEEP_SKY) {
       if (!projectSky(o.v) || pt.up < 0.03) continue;
       const radius = Math.max(8 * unit, o.size * 0.5 * RAD * view.s * pt.k);
-      consider(pt.x, pt.y, Math.min(radius, 40 * unit) - (o.glow ? 0 : 20 * unit), () => ({
-        title: o.name, radius: Math.min(radius, 60 * unit), lines: [`${o.kind} · ${o.distance} away`, o.note],
-        pos: () => projectSky(o.v) && pt.up > 0 ? [pt.x, pt.y] : null,
-      }));
+      consider(pt.x, pt.y, Math.min(radius, 40 * unit) - (o.glow ? 0 : 20 * unit), () => describeDeepSky(o));
+    }
+  }
+  if (aboriginal()) {
+    for (const item of lore.labels) {
+      if (projectSky(item.v) && pt.up > 0.03) consider(pt.x, pt.y, 14 * unit, () => describeLore(item));
     }
   }
   for (let i = 0; i < spriteCount && catMag[i] <= env.limMag; i++) {
-    const v = catV.subarray(i * 3, i * 3 + 3);
-    if (!projectSky(v) || pt.up < 0) continue;
-    const name = starNames.get(i), facts = STAR_FACTS[name];
-    consider(pt.x, pt.y, name ? 6 * unit : 0, () => ({
-      title: name || 'Star',
-      lines: [`Magnitude ${catMag[i].toFixed(1)} · ${COLOR_NAMES[catTint[i]]}`]
-        .concat(facts ? [`${facts[0].toLocaleString()} light-years away`, facts[1]] : []),
-      pos: () => projectSky(v) && pt.up > 0 ? [pt.x, pt.y] : null,
-    }));
+    if (!projectSky(catV.subarray(i * 3, i * 3 + 3)) || pt.up < 0) continue;
+    consider(pt.x, pt.y, starNames.has(i) ? 6 * unit : 0, () => describeStar(i));
   }
+  tour = null;
   selected = best ? Object.assign(best(), { until: nowSec() + 14 }) : null;
+}
+
+// ───────────────────────── tonight's tour ─────────────────────────
+// A slow pass through what is in view right now: one thing at a time, ringed, with its card.
+const TOUR_SECONDS = 40;
+let tour = null;
+
+function tourStops() {
+  const inView = v => projectSky(v) && pt.up > 0.25 && onScreen(60 * unit);
+  const stops = [];
+  if (moon.visible && moon.alt > 10 && onScreenAt(moon.x, moon.y)) stops.push(describeMoon);
+  for (const p of [...Astro.PLANETS].sort((a, b) => a.mag - b.mag)) {
+    if (p.mag <= Math.min(env.limMag, 5) && inView(p.vec)) stops.push(() => describePlanet(p));
+  }
+  const stars = [...starNames.keys()].filter(i => catMag[i] <= env.limMag && inView(catV.subarray(i * 3, i * 3 + 3))).slice(0, 6);
+  const deep = env.limMag > 4.6 ? DEEP_SKY.filter(o => inView(o.v)).sort((a, b) => b.glow - a.glow).slice(0, 5) : [];
+  const local = aboriginal() ? lore.labels.filter(item => inView(item.v)) : [];
+  // alternate stars with the fainter, stranger things
+  for (let k = 0; k < Math.max(stars.length, deep.length, local.length); k++) {
+    if (k < local.length) stops.push(() => describeLore(local[k]));
+    if (k < stars.length) stops.push(() => describeStar(stars[k]));
+    if (k < deep.length) stops.push(() => describeDeepSky(deep[k]));
+  }
+  return stops;
+}
+const onScreenAt = (x, y) => x > 0 && x < W && y > 0 && y < H;
+function toggleTour() {
+  if (tour) { tour = null; selected = null; return; }
+  const stops = tourStops();
+  tour = stops.length ? { stops, index: -1, next: 0 } : null;
+  lastReadout = -10;
+}
+function updateTour(now) {
+  if (!tour || now < tour.next) return;
+  if (++tour.index >= tour.stops.length) { tour = null; selected = null; lastReadout = -10; return; }
+  selected = Object.assign(tour.stops[tour.index](), { until: now + TOUR_SECONDS });
+  tour.next = now + TOUR_SECONDS - 1.5;
 }
 
 function wrapText(text, maxWidth) {
@@ -1298,11 +1515,42 @@ function drawSelection(now) {
   setSpacing(0);
 }
 
+// ───────────────────────── ceiling setup ─────────────────────────
+// Three questions that set mirroring, direction and scale, each answered by looking at a mark
+// drawn on the ceiling. setup.step is 0 when closed.
+const setup = { step: 0 };
+const SETUP_SPAN = 0.5;   // the two crosses of step 3 sit this share of the picture's short side apart
+
+function drawSetup() {
+  if (!setup.step) return;
+  const cx = W / 2, cy = H / 2, m = Math.min(W, H);
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 0.9;
+  ctx.strokeStyle = ctx.fillStyle = '#ffd9a0'; ctx.lineWidth = 2.5 * unit; ctx.lineCap = 'round';
+  ctx.beginPath();
+  if (setup.step === 1) {
+    // a letter that is plainly wrong when mirrored
+    ctx.font = `600 ${Math.round(m * 0.3)}px "Segoe UI", system-ui, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('R', cx, cy - m * 0.1);
+  } else if (setup.step === 2) {
+    // an arrow toward the top of the picture
+    const tip = cy - m * 0.38, head = m * 0.06;
+    ctx.moveTo(cx, cy - m * 0.02); ctx.lineTo(cx, tip);
+    ctx.moveTo(cx - head, tip + head); ctx.lineTo(cx, tip); ctx.lineTo(cx + head, tip + head);
+  } else {
+    for (const side of [-1, 1]) {
+      const x = cx + side * m * SETUP_SPAN / 2, arm = m * 0.025;
+      ctx.moveTo(x - arm, cy); ctx.lineTo(x + arm, cy); ctx.moveTo(x, cy - arm); ctx.lineTo(x, cy + arm);
+    }
+  }
+  ctx.stroke();
+}
+
 // ───────────────────────── render loop ─────────────────────────
-let last = 0, lastReadout = -10, lineAlpha = 0, nameAlpha = 0;
+let last = 0, lastReadout = -10, lineAlpha = 0, nameAlpha = 0, slowFrames = 0, qualityNoteUntil = 0;
 
 function resize() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const dpr = Math.min(window.devicePixelRatio || 1, [1, 1.5, 2][settings.quality]);
   W = canvas.width = Math.round(window.innerWidth * dpr);
   H = canvas.height = Math.round(window.innerHeight * dpr);
   mwCanvas.width = Math.ceil(W * MW_SCALE); mwCanvas.height = Math.ceil(H * MW_SCALE);
@@ -1312,6 +1560,8 @@ function resize() {
 }
 
 function frame(ms) {
+  // nothing can be drawn into a window with no size (a hidden or still-opening tab); wait for one
+  if (W < 2 || H < 2) { requestAnimationFrame(frame); return; }
   // dt drives motion and is capped so nothing jumps after a pause; fades use the real elapsed time
   const now = ms / 1000, elapsed = Math.min(5, now - last), dt = Math.min(0.1, elapsed);
   last = now;
@@ -1324,11 +1574,22 @@ function frame(ms) {
   Astro.updatePlanets(d);
   updateSatellites(elapsed);
   updateAurora(elapsed);
+  updateTour(now);
 
-  // the guide (figures and names) fades in while the mouse is in use, unless pinned on
-  const peek = started && !document.body.classList.contains('idle'), ease = Math.min(1, elapsed * 2.5);
-  lineAlpha += ((settings.lines || peek ? 1 : 0) - lineAlpha) * ease;
-  nameAlpha += ((settings.names || peek ? 1 : 0) - nameAlpha) * ease;
+  // If frames keep arriving slowly, step the quality down rather than stutter all night.
+  // Long gaps are a hidden or paused tab, not a slow machine, so they are ignored.
+  if (elapsed < 0.25) {
+    slowFrames = elapsed > 0.045 ? slowFrames + 1 : Math.max(0, slowFrames - 2);
+    if (slowFrames > 240 && settings.quality > 0) {
+      slowFrames = 0; qualityNoteUntil = now + 90;
+      change('quality', settings.quality - 1);
+    }
+  }
+
+  // Sky overlays depend only on their explicit toggles.
+  const ease = Math.min(1, elapsed * 2.5);
+  lineAlpha += ((settings.lines ? 1 : 0) - lineAlpha) * ease;
+  nameAlpha += ((settings.names ? 1 : 0) - nameAlpha) * ease;
 
   if (now > radiant.until) pickRadiant(now);
   if (now >= nextMeteor) {
@@ -1337,7 +1598,8 @@ function frame(ms) {
   }
   if (now >= nextSatellite) {
     // without real orbits, satellites still only show in the hours after dusk and before dawn
-    if (!realSats.length && env.night > 0.5 && (!settings.daylight || env.sunAlt > -40)) spawnSatellite(now);
+    if (settings.style === 'dreamy' && !realSats.length && env.night > 0.5
+      && (!settings.daylight || env.sunAlt > -40)) spawnSatellite(now);
     nextSatellite = now + 120 + Math.random() * 240;
   }
 
@@ -1367,12 +1629,17 @@ function frame(ms) {
   if (nameAlpha > 0.01) drawLabels(nameAlpha);
   drawSelection(now);
 
-  if (settings.brightness < 100) {
+  // The sleep timer fades the picture out with the music; the sunrise alarm brings it back early
+  // in its dawn so there is something to wake to.
+  const picture = env.dawn === null ? sleepFade : Math.max(sleepFade, Math.min(1, env.dawn * 4));
+  const shown = settings.brightness / 100 * picture;
+  if (shown < 1) {
     ctx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = 1 - settings.brightness / 100;
+    ctx.globalAlpha = 1 - shown;
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, W, H);
   }
+  drawSetup();
   if (now - lastReadout > (speedIdx ? 0.25 : 1)) { lastReadout = now; updateReadout(now); }
   requestAnimationFrame(frame);
 }
@@ -1401,21 +1668,39 @@ async function refreshStormIndex() {
     if (Number.isFinite(kp)) aurora.kp = kp;
   } catch {}
 }
-function refreshLiveData() { refreshOrbits(); refreshStormIndex(); }
+// Real cloud cover from Open-Meteo, only if "Real clouds" is ticked. The place is sent rounded to
+// a tenth of a degree (about 10 km): enough for the weather, vague about where you are.
+async function refreshWeather() {
+  if (!settings.weather || !settings.online) {
+    if (weather.cover !== null) { weather.cover = null; bakeClouds(); applySettings(); }
+    return;
+  }
+  try {
+    const reply = await (await fetch('https://api.open-meteo.com/v1/forecast?latitude=' + settings.lat.toFixed(1)
+      + '&longitude=' + settings.lon.toFixed(1) + '&current=cloud_cover')).json();
+    const cover = reply.current && reply.current.cloud_cover;
+    if (Number.isFinite(cover)) { weather.cover = clamp(cover, 0, 100); bakeClouds(); applySettings(); }
+  } catch {}
+}
+function refreshLiveData() { refreshOrbits(); refreshStormIndex(); refreshWeather(); }
 setInterval(refreshStormIndex, 20 * 60000);
+setInterval(refreshWeather, 30 * 60000);
 setInterval(refreshOrbits, 6 * 3600000);
 
 // ───────────────────────── UI ─────────────────────────
 const $ = id => document.getElementById(id);
 const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 const FORMAT = {
-  meteors: v => v + '/min', volume: v => v + '%', brightness: v => v + '%',
+  meteors: v => settings.realMeteors ? 'real rate' : v ? v + '/min' : 'none', volume: v => v + '%', brightness: v => v + '%',
   darkness: v => v < 25 ? 'city' : v < 55 ? 'suburb' : v < 85 ? 'country' : 'outback',
-  clouds: v => v ? v + '%' : 'clear', fov: v => v + '°', tilt: v => v === 90 ? 'overhead' : v + '°',
+  clouds: v => cloudCover() !== v ? 'real ' + Math.round(cloudCover()) + '%' : v ? v + '%' : 'clear',
+  fov: v => v + '°', tilt: v => v === 90 ? 'overhead' : v + '°',
   facing: v => COMPASS[Math.round(v / 45) % 8] + ' ' + v + '°', moon: v => v + '×',
   aurora: v => v ? v + '%' : 'real only',
+  motion: v => v === 0 ? 'natural' : v < 40 ? 'gentle' : v < 80 ? 'alive' : 'vivid',
+  quality: v => ['low', 'medium', 'high'][v], nature: v => v ? v + '%' : 'off',
 };
-const TOGGLES = ['lines', 'names', 'daylight', 'online', 'mirror', 'sounds'];
+const TOGGLES = ['lines', 'names', 'daylight', 'online', 'mirror', 'sounds', 'audio', 'autoMenu', 'realMeteors', 'issAlert', 'weather'];
 const CITIES = [
   ['Canberra', -35.28, 149.13], ['Sydney', -33.87, 151.21], ['Melbourne', -37.81, 144.96], ['Perth', -31.95, 115.86],
   ['Auckland', -36.85, 174.76], ['Tokyo', 35.68, 139.69], ['Singapore', 1.35, 103.82], ['Cape Town', -33.92, 18.42],
@@ -1423,27 +1708,47 @@ const CITIES = [
   ['Santiago', -33.45, -70.67],
 ];
 const TIME_FORMAT = { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' };
-let started = false, idleTimer = 0, sleepAt = 0, sleepFade = 1;
+let started = false, idleTimer = 0, sleepAt = 0, sleepFade = 1, alertedPass = 0;
+let menuTimer = 0, menuDragging = false, keyboardMenu = false;
+const menuPointer = { x: null, y: null };
 
 function applySettings() {
   canvas.style.transform = settings.mirror ? 'scaleX(-1)' : '';
+  SkyAudio.setMuted(!settings.audio);
   SkyAudio.setVolume(settings.volume / 100 * sleepFade);
+  SkyAudio.setNature(settings.nature / 100);
   for (const key in FORMAT) { $(key).value = settings[key]; $('o-' + key).textContent = FORMAT[key](settings[key]); }
   for (const key of TOGGLES) $(key).checked = settings[key];
+  $('culture').value = settings.culture; $('alarm').value = settings.alarm;
   $('lat').value = settings.lat; $('lon').value = settings.lon;
   const city = CITIES.find(c => Math.abs(c[1] - settings.lat) < 0.02 && Math.abs(c[2] - settings.lon) < 0.02);
   $('city').value = city ? city[0] : '';
   $('speed').value = speedIdx; $('o-speed').textContent = SPEED_LABELS[speedIdx];
+  $('style').value = settings.style;
+  updateMenuVisibility();
 }
 function change(key, value) {
   if (!(key in DEFAULTS) || typeof value !== typeof DEFAULTS[key] || Number.isNaN(value)) return;
+  if (key === 'culture' && value !== 'western' && value !== 'aboriginal') return;
+  if (key === 'alarm' && !/^(([01]\d|2[0-3]):[0-5]\d)?$/.test(value)) return;
   const input = $(key);
   if (input && input.type === 'range') value = clamp(value, +input.min, +input.max);
   settings[key] = value;
-  if (key === 'meteors') scheduleMeteor(nowSec());
-  if (key === 'clouds') bakeClouds();
+  if (Object.values(PRESETS).some(preset => key in preset)) settings.style = 'custom';
+  if (key === 'meteors' || key === 'realMeteors') scheduleMeteor(nowSec());
+  if (key === 'clouds' || key === 'motion') bakeClouds();
   if (key === 'online' && value) refreshLiveData();
   if (key === 'lat' || key === 'lon') lastPassCheck = -1e9;
+  if (key === 'weather' || key === 'lat' || key === 'lon' || key === 'online') refreshWeather();
+  if (key === 'quality') resize();
+  applySettings(); saveJSON(STORE_KEY, settings);
+  remote.dirty = true;
+}
+function applyPreset(style) {
+  if (!Object.hasOwn(PRESETS, style)) return;
+  Object.assign(settings, PRESETS[style], { style });
+  bakeClouds(); scheduleMeteor(nowSec());
+  if (style === 'real') goLive();
   applySettings(); saveJSON(STORE_KEY, settings);
   remote.dirty = true;
 }
@@ -1453,6 +1758,7 @@ function setLocation(lat, lon) {
 }
 function setSpeed(index) { speedIdx = clamp(Math.round(index) || 0, 0, SPEEDS.length - 1); applySettings(); remote.dirty = true; }
 function goLive() { speedIdx = 0; timeOffset = 0; lastReadout = -10; applySettings(); remote.dirty = true; }
+function watchSkyTurn() { setSpeed(2); lastReadout = -10; }
 function goToTime(ms) {
   if (!Number.isFinite(ms)) return;
   // the planet and Moon formulas are only good for a few centuries around now
@@ -1483,6 +1789,7 @@ function updateReadout(now) {
     `${Math.abs(settings.lat).toFixed(2)}°${ns} ${Math.abs(settings.lon).toFixed(2)}°${ew}`,
     new Date(simTime).toLocaleString([], TIME_FORMAT) + (simulated ? ' (simulated)' : ''),
   ];
+  if (speedIdx) parts.push('Time running at ' + SPEED_LABELS[speedIdx] + ' — Live time returns to now');
   if (settings.daylight && env.trueSunAlt > -6) {
     const dark = nextDark();
     parts.push((env.trueSunAlt > 0 ? 'Daylight' : 'Twilight') + (dark ? `: stars from about ${clock(dark)}` : ''));
@@ -1503,16 +1810,30 @@ function updateReadout(now) {
     }
   }
   if (shower) parts.push(shower.name + ' meteor shower active');
-  const overhead = realSats.filter(s => s.fade > 0.5).map(s => s.name);
-  if (overhead.length) parts.push(overhead.join(' and ') + ' passing over now');
-  else if (issPass) parts.push('Next ISS pass ' + new Date(issPass).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }));
-  if (aurora.live > 0.05) parts.push(`Real aurora storm in progress (Kp ${aurora.kp.toFixed(1)})`);
-  if (sleepAt) {
-    // the music fades out over the last three minutes of the sleep timer
-    const fade = clamp((sleepAt - Date.now()) / 180000, 0, 1);
-    if (fade !== sleepFade) { sleepFade = fade; SkyAudio.setVolume(settings.volume / 100 * fade); }
-    parts.push(fade > 0 ? 'Music fades out by ' + clock(sleepAt) : 'Music off (sleep timer)');
+  if (settings.realMeteors) {
+    const hourly = Math.round(realMeteorRate * 60);
+    parts.push(hourly > 1 ? `About ${hourly} meteors an hour tonight` : 'About one meteor an hour tonight');
   }
+  const overhead = realSats.filter(s => s.fade > 0.5).map(s => s.name);
+  const minutesToPass = issPass && !simulated ? (issPass - Date.now()) / 60000 : -1;
+  if (overhead.length) parts.push(overhead.join(' and ') + ' passing over now');
+  else if (settings.issAlert && minutesToPass > 0 && minutesToPass <= 5) {
+    parts.push(`ISS appears in ${Math.ceil(minutesToPass)} min`);
+    // one chime per pass; the pass time shifts by a few seconds each time it is recalculated
+    if (Math.abs(issPass - alertedPass) > 600000) { alertedPass = issPass; SkyAudio.chime(); }
+  } else if (issPass) parts.push('Next ISS pass ' + new Date(issPass).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }));
+  if (aurora.live > 0.05) parts.push(`Real aurora storm in progress (Kp ${aurora.kp.toFixed(1)})`);
+  if (cloudCover() !== settings.clouds) parts.push(`Real cloud cover ${Math.round(cloudCover())}%`);
+  if (tour) parts.push(`Tour: ${Math.max(1, tour.index + 1)} of ${tour.stops.length}`);
+  if (now < qualityNoteUntil) parts.push('Quality lowered to keep the picture smooth');
+  // The sleep timer fades the music and the picture over its last three minutes; the sunrise
+  // alarm brings them back.
+  let fade = sleepAt ? clamp((sleepAt - Date.now()) / 180000, 0, 1) : 1;
+  if (env.dawn !== null) fade = Math.max(fade, env.dawn);
+  if (fade !== sleepFade) { sleepFade = fade; SkyAudio.setVolume(settings.volume / 100 * fade); }
+  if (env.dawn !== null) parts.push('Wake-up dawn');
+  else if (sleepAt) parts.push(fade > 0 ? 'Sleep timer: fades out by ' + clock(sleepAt) : 'Asleep: move the mouse to bring the sky back');
+  if (settings.alarm && env.dawn === null) parts.push('Wake-up dawn set for ' + settings.alarm);
   if (remote.url) parts.push('Phone remote: ' + remote.url);
   remote.status = parts.join('  ·  ');
   $('readout').textContent = remote.status;
@@ -1530,6 +1851,38 @@ $('city').addEventListener('change', e => {
   if (city) setLocation(city[1], city[2]);
 });
 $('go').addEventListener('click', () => goToTime(new Date($('when').value).getTime()));
+$('culture').addEventListener('change', e => change('culture', e.target.value));
+$('alarm').addEventListener('change', e => change('alarm', e.target.value));
+
+// each step of the ceiling setup: what to ask, and what each answer does
+const SETUP_STEPS = [null, {
+  text: 'Step 1 of 3. Look at the big letter R in the picture. Does it read the right way round?',
+  choices: [['Yes', () => {}], ['No, it is back to front', () => change('mirror', !settings.mirror)]],
+}, {
+  text: 'Step 2 of 3. The arrow points to the top of the picture. Which way does it point in your room? A phone compass will tell you.',
+  choices: COMPASS.map((name, k) => [name, () => { change('tilt', 90); change('facing', (k * 45 + 180) % 360); }]),
+}, {
+  text: 'Step 3 of 3. Lie where you will watch from, stretch out an arm and make a fist. How many fists fit between the two crosses?',
+  // a fist at arm's length covers about ten degrees; the crosses then fix the scale of the whole picture
+  choices: [1, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8].map(fists => [String(fists),
+    () => change('fov', Math.round(4 * Math.atan(Math.tan(fists * 10 / 4 * RAD) / SETUP_SPAN) / RAD))]),
+}];
+function showSetup(step) {
+  setup.step = step;
+  $('setup').hidden = !step;
+  document.body.classList.toggle('setting-up', !!step);
+  if (!step) return;
+  $('setup-text').textContent = SETUP_STEPS[step].text;
+  $('setup-choices').replaceChildren(...SETUP_STEPS[step].choices.map(([label, apply]) => {
+    const button = document.createElement('button');
+    button.textContent = label;
+    button.addEventListener('click', () => { apply(); showSetup(step < 3 ? step + 1 : 0); });
+    return button;
+  }));
+}
+$('setup-open').addEventListener('click', () => showSetup(1));
+$('setup-close').addEventListener('click', () => showSetup(0));
+$('tour').addEventListener('click', toggleTour);
 
 function locate() {
   const button = $('locate'), reset = () => { button.textContent = 'Locate me'; };
@@ -1549,7 +1902,7 @@ function startShower() {
   showerUntil = now + 25;
   scheduleMeteor(now);
 }
-function toggleAurora() { change('aurora', settings.aurora ? 0 : DEFAULTS.aurora); }
+function toggleAurora() { change('aurora', settings.aurora ? 0 : PRESETS.dreamy.aurora); }
 function setSleepTimer(minutes) {
   sleepAt = minutes > 0 ? Date.now() + minutes * 60000 : 0;
   sleepFade = 1; lastReadout = -10;
@@ -1567,19 +1920,51 @@ function begin() {
   $('intro').classList.add('gone');
   document.body.classList.remove('intro');
   if (!document.fullscreenElement) toggleFullscreen();
+  updateMenuVisibility(true);
   wake();
 }
-function wake() {
+function pointerOverMenu() {
+  if (menuPointer.x === null || menuPointer.y === null) return false;
+  const box = $('panel').getBoundingClientRect();
+  return menuPointer.x >= box.left && menuPointer.x <= box.right
+    && menuPointer.y >= box.top && menuPointer.y <= box.bottom;
+}
+function showMenu(visible) {
+  document.body.classList.toggle('menu-hidden', !visible);
+  $('panel').inert = !visible;
+  // A previously clicked slider must not keep the menu open after the mouse leaves.
+  if (!visible && $('panel').contains(document.activeElement)) document.activeElement.blur();
+}
+function updateMenuVisibility(immediate = false) {
+  if (!started) return;
+  const visible = !settings.autoMenu || pointerOverMenu() || menuDragging || keyboardMenu;
+  if (visible) {
+    clearTimeout(menuTimer); menuTimer = 0;
+    showMenu(true);
+  } else if (immediate) {
+    clearTimeout(menuTimer); menuTimer = 0;
+    showMenu(false);
+  } else if (!menuTimer && !document.body.classList.contains('menu-hidden')) {
+    // A short grace period avoids flicker when moving between nearby controls.
+    menuTimer = setTimeout(() => { menuTimer = 0; updateMenuVisibility(true); }, 650);
+  }
+}
+function wake(event) {
+  if (event) {
+    menuPointer.x = event.clientX; menuPointer.y = event.clientY;
+    if (!pointerOverMenu()) keyboardMenu = false;
+    // touching the mouse once the sleep timer has started fading cancels it
+    if (sleepAt && sleepFade < 1 && env.dawn === null) setSleepTimer(0);
+  }
   document.body.classList.remove('idle');
   clearTimeout(idleTimer);
-  idleTimer = setTimeout(() => {
-    if (started && !$('panel').matches(':hover, :focus-within')) document.body.classList.add('idle');
-    else if (started) wake();
-  }, 3500);
+  idleTimer = setTimeout(() => { if (started && !pointerOverMenu()) document.body.classList.add('idle'); }, 3500);
+  updateMenuVisibility();
 }
 const ACTIONS = {
   meteor: () => spawnMeteor(nowSec(), { fireball: false }), fireball: () => spawnMeteor(nowSec(), { fireball: true }),
-  shower: startShower, aurora: toggleAurora, live: goLive, mute: () => SkyAudio.toggleMute(), fullscreen: toggleFullscreen,
+  shower: startShower, aurora: toggleAurora, live: goLive, turn: watchSkyTurn, tour: toggleTour,
+  mute: () => change('audio', !settings.audio), fullscreen: toggleFullscreen,
 };
 
 $('intro').addEventListener('click', begin);
@@ -1587,29 +1972,48 @@ $('fs').addEventListener('click', toggleFullscreen);
 $('shower').addEventListener('click', startShower);
 $('sleep').addEventListener('change', e => setSleepTimer(+e.target.value));
 $('live').addEventListener('click', goLive);
+$('turn').addEventListener('click', watchSkyTurn);
+$('style').addEventListener('change', e => applyPreset(e.target.value));
 $('locate').addEventListener('click', locate);
 canvas.addEventListener('click', e => {
   if (!started) return;
   const box = canvas.getBoundingClientRect(), x = (e.clientX - box.left) / box.width * W;
   identify(settings.mirror ? W - x : x, (e.clientY - box.top) / box.height * H);
 });
-window.addEventListener('mousemove', wake);
+window.addEventListener('pointermove', wake);
 window.addEventListener('pointerdown', wake);
-window.addEventListener('resize', resize);
+$('panel').addEventListener('pointerdown', () => { menuDragging = true; updateMenuVisibility(); });
+window.addEventListener('pointerup', () => { menuDragging = false; updateMenuVisibility(); });
+window.addEventListener('pointercancel', () => { menuDragging = false; updateMenuVisibility(); });
+window.addEventListener('resize', () => { resize(); updateMenuVisibility(); });
+function leaveMenu() {
+  menuPointer.x = menuPointer.y = null; menuDragging = keyboardMenu = false;
+  updateMenuVisibility();
+}
+document.documentElement.addEventListener('pointerleave', leaveMenu);
+window.addEventListener('blur', leaveMenu);
 document.addEventListener('visibilitychange', () => {
   if (started && document.visibilityState === 'visible') { keepAwake(); SkyAudio.start(); }
 });
 window.addEventListener('keydown', e => {
-  if (e.ctrlKey || e.altKey || e.metaKey || /^(number|datetime-local|select-one)$/.test(e.target.type)) return;
+  if (e.key === 'Escape' && started && settings.autoMenu) {
+    leaveMenu(); updateMenuVisibility(true); return;
+  }
+  if (e.ctrlKey || e.altKey || e.metaKey || /^(number|datetime-local|time|select-one)$/.test(e.target.type)) return;
   const key = e.key.toLowerCase();
   if (!started) { if (key === 'enter' || key === ' ') { e.preventDefault(); begin(); } return; }
-  if (key === 'f') toggleFullscreen();
-  else if (key === 'm') SkyAudio.toggleMute();
+  if (key === 'h') {
+    e.preventDefault(); keyboardMenu = true;
+    showMenu(true); $('autoMenu').focus();
+  }
+  else if (key === 'f') toggleFullscreen();
+  else if (key === 'm') ACTIONS.mute();
   else if (key === 'c') change('lines', !settings.lines);
   else if (key === 'n') change('names', !settings.names);
   else if (key === 'd') change('daylight', !settings.daylight);
   else if (key === 'l') goLive();
   else if (key === 'a') toggleAurora();
+  else if (key === 't') toggleTour();
   else if (key === 's') startShower();
   else if (key === 'b') ACTIONS.fireball();
   else if (key === ' ') { e.preventDefault(); ACTIONS.meteor(); }
@@ -1621,6 +2025,7 @@ window.addEventListener('keydown', e => {
 const remote = { on: false, since: -1, url: '', status: '', dirty: true, lastPush: 0 };
 
 function runCommand(c) {
+  if (typeof c.style === 'string') applyPreset(c.style);
   if (c.set && typeof c.set === 'object') {
     for (const key in c.set) {
       if (key === 'lat') setLocation(c.set.lat, c.set.lon ?? settings.lon);
@@ -1657,8 +2062,12 @@ async function connectRemote() {
 
 resize();
 bakeClouds();
+scheduleMeteor(nowSec());
 applySettings();
 refreshLiveData();
 connectRemote();
 requestAnimationFrame(frame);
+// The bedtime launcher opens the page with ?autostart in a browser that is allowed to play sound
+// straight away, so the sky starts with no click.
+if (new URLSearchParams(location.search).has('autostart')) begin();
 })();

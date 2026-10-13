@@ -4,6 +4,8 @@ Khonshu turns a projector and a ceiling into the real sky above you. It shows th
 Moon and Milky Way where they actually are right now for your location, turns with the Earth, and
 plays slow ambient music to fall asleep to. It runs in a web browser with nothing to install.
 
+**Website:** [Open Khonshu](https://projectkhonshu.eliasedwin7.workers.dev/)
+
 Named after Khonshu, the Egyptian god of the Moon and the traveller of the night sky.
 
 ## Starting it
@@ -14,48 +16,124 @@ appears prints an address such as `http://192.168.1.20:8765/remote`. Open that a
 on the same Wi-Fi to control the sky from bed. Windows may ask once whether to allow Python through
 the firewall; allow it for private networks.
 
+**One click at bedtime.** Double-click `Khonshu Bedtime.bat`. It does the same, but opens the sky
+fullscreen in Edge or Chrome with the music already playing, so there is no Begin button and no
+window to drag. Press Alt+F4 on the sky to close it. It keeps its own settings, separate from your
+normal browser. It opens on the main display, so make the projector the main display first.
+
 **Without Python.** Double-click `index.html`. Everything works except the phone remote.
 
 Then drag the browser window onto the projector, click **Begin** (this starts the music and goes
-fullscreen), and move the mouse whenever you want the controls.
+fullscreen). **Auto menu** is on by default: move the pointer over the menu area near the bottom
+to reveal the controls. Moving it away hides the menu after a short fade, even if a slider still
+has focus. Untick **Auto menu** to keep the controls visible. The phone remote has the same setting.
+For keyboard access, **H** opens and focuses the menu; **Esc** hides it in Auto mode.
+
+**Sky style** offers three presets on the projector and phone remote:
+
+- **Real sky** is the default: a faint, mostly grey Milky Way, gentle twinkle, a true-size Moon,
+  daylight following the real clock, and aurora only when the live storm model permits it. Meteors
+  follow **Real meteor rate**: about eight stray ones an hour for a whole dark sky, more during an
+  annual shower, and fewer through a narrow field of view or under city lights. Untick it to set
+  your own rate with the Meteors slider.
+- **Dreamy** enhances twinkle, adds aurora and a larger Moon, and shows night at any hour.
+- **Sleep** dims the picture, lowers the music volume, and removes automatic meteors and added aurora.
+
+Cloud wisps form, stretch and dissolve as two noise fields evolve through each other. They obscure
+the stars and are lit by the Moon, daylight and city glow. These are generated clouds, not local
+weather observations, unless you tick **Real clouds**: the amount of cloud then follows the real
+sky at the chosen place (the shapes are still generated). **Sky motion** adjusts twinkle and wind
+speed without changing the clock.
+Devices requesting reduced motion start each preset at natural. Adjusting a preset shows **Custom**;
+your changes are saved. Upgrading adopts Real sky once, while retaining your location and projector alignment.
+
+**Watch sky turn** runs time at one minute per second, making Earth's rotation visible over a few
+seconds. This is simulated time, shown in the controls; **Live time** (or **L**) returns to the
+current sky. Real-time rotation is naturally too slow to notice at a glance.
 
 ## What you see
 
 | | |
 |---|---|
 | **Stars** | The 5,044 stars visible to the naked eye, with true positions, brightness and colour, plus a generated background of fainter ones. Low stars dim and twinkle more than high ones. |
-| **Milky Way** | NASA's all-sky photographic map, including both Magellanic Clouds and the dark dust lanes. |
+| **Milky Way** | NASA's all-sky map, with muted colour and compressed highlights for a faint visual-sky appearance, including both Magellanic Clouds and the dark dust lanes. |
 | **Moon** | A real image of the near side, with the correct phase, position and tilt. Lunar eclipses happen on the right dates, with Earth's coppery shadow crossing the disc. |
 | **Planets** | Mercury to Uranus, with true positions and brightness. They shine steadily while the stars twinkle. |
 | **Deep sky** | Twenty objects you can pick out without a telescope: the Orion and Carina nebulae, Omega Centauri, the Pleiades, the Andromeda Galaxy and others. |
 | **Satellites** | The International Space Station, Tiangong and Hubble on their real orbits, visible when a real pass happens. The control panel tells you when the next ISS pass is due. |
 | **Meteors** | Random, and during real annual showers they streak from the shower's true radiant. |
-| **Aurora** | Curtains of green and red toward the nearer pole. The Aurora slider sets how strong a display to show; it also responds to real geomagnetic storms. |
+| **Aurora** | Finite, folded curtains with uneven rays: green below, faint red above, and a trace of violet at the foot. Weak displays stay toward the pole; strong displays can extend overhead. The Aurora slider adds a display; at zero it responds only to the live storm model. |
 | **Daylight** | Sunset, dusk, night and dawn as they happen, with stars appearing one by one. Turn off "Follow daylight" for night at any hour. |
 | **Weather and site** | Drifting cloud, and a "Sky darkness" slider from city to outback that hides the faint stars and Milky Way the way light pollution does. |
 
-Constellation figures, names and compass points fade in while you move the mouse and fade out
-again, so the sky is bare when you are just looking at it. Click any star, planet, satellite or
-deep-sky object to see what it is.
+Constellation figures, names and compass points are off by default. Enable **Show constellations**
+or **Show names** (shortcuts **C** and **N**) when you want them. Moving the pointer over the menu
+reveals the controls. Click any star, planet, satellite or deep-sky object to see what it is.
+
+**Sound on** toggles all music and meteor audio, keeping your volume setting. The toggle is on
+the sky and phone remote; **M** does the same thing. Your sound preference is saved for next time.
+
+**Sound collection** is available in the sky menu and on the phone remote. It includes Khonshu's
+offline ambience, [myNoise Black Hole](https://mynoise.net/NoiseMachines/intergalacticSoundscapeGenerator.php),
+[SomaFM Drone Zone](https://somafm.com/dronezone/) and
+[SomaFM Deep Space One](https://somafm.com/deepspaceone/).
+Choose an entry and use **Open player** to launch its official player in another tab. Your choice
+is remembered. External players need internet access and have their own playback and volume controls;
+Khonshu's sound toggle and sleep timer apply only to its built-in audio. Turn **Sound on** off in
+Khonshu when listening to an external player to avoid overlapping sound.
+
+## Sleeping and waking
+
+- **Sleep timer** fades the music and the picture to black over its last three minutes. Moving the
+  mouse brings the sky back.
+- **Wake-up dawn** takes a time of day. Over the 25 minutes before it, the sky runs through dawn
+  with a Sun rising in the east, whatever the real Sun is doing, and the music rises with it. It
+  repeats every day until you clear the time. The computer must stay on overnight.
+- **Night sounds** mixes crickets, frogs, leaves and a distant boobook owl in with the music. They
+  are synthesised, like the music, and need no internet.
+- **ISS alert** plays a soft chime and shows a note about five minutes before the space station
+  appears. A phone with the remote open buzzes too, if it supports vibration.
+
+## Learning the sky
+
+- **Tour** (or **T**) walks through what is in view right now: the Moon, planets, bright stars and
+  deep-sky objects, one at a time, each ringed with its card for about 40 seconds. Press it again
+  to stop.
+- **Sky culture** switches the figures and names between the Western constellations and an
+  Aboriginal sky: the Emu in the Sky along the dark lane of the Milky Way, the Yolŋu canoe Djulpan
+  in Orion, and Boorong names for the bright stars. This is a small, simplified selection drawn
+  from published accounts, not a complete or authoritative record; every nation has its own sky.
+  The Emu's outline is a sketch. Turn on **Show constellations** and **Show names** to see it.
+
+## Picture quality
+
+**Quality** (low, medium, high) trades sharpness for speed. If the picture stutters for several
+seconds, Khonshu lowers it by itself and says so in the status line.
 
 ## Keys
 
 | Key | Action | Key | Action |
 |---|---|---|---|
+| T | Tour of tonight's sky | H | Open the menu |
 | F | Fullscreen | Space | Meteor |
 | M | Mute | B | Fireball |
-| C | Pin constellation figures | S | Meteor shower |
-| N | Pin names | A | Aurora on or off |
+| C | Toggle constellation figures | S | Meteor shower |
+| N | Toggle names | A | Aurora on or off |
 | D | Follow daylight on or off | L | Back to live time |
 
 ## Setting it up on a ceiling
 
-- **Direction.** By default you look straight up with north at the top of the picture. Move the
-  mouse to show the N/E/S/W letters, then turn **Facing** until they match the room.
+The quick way is **Ceiling setup** in the menu. It asks three questions, each answered by looking
+at a mark it draws on the ceiling: whether a letter R reads correctly (mirroring), which way an
+arrow points (direction), and how many fists at arm's length fit between two crosses (life-size
+scale). You can also set each one by hand:
+
+- **Direction.** By default you look straight up with north at the top of the picture. Enable
+  **Show names** to see the N/E/S/W letters, then turn **Facing** until they match the room.
 - **Scale.** For a life-size sky, set **Field of view** to the angle the picture covers from where
   you lie. A typical ceiling image is 30–50° on its short side. Wider shows more sky but makes
   everything smaller.
-- **Moon size.** 1× is true size, which is only a few pixels. The default is 3×.
+- **Moon size.** 1× is true size, which is only a few pixels and is the Real sky default. Dreamy uses 3×.
 - **Flipped image.** Use the projector's own ceiling or flip setting; "Mirror image" covers
   left-right reversal.
 - **Sound.** Projector speakers are thin. The music is mostly low and slow, so an external speaker
@@ -76,15 +154,20 @@ runs it at up to an hour per second.
 - Satellites use a simplified orbit model that stays within about 15 km of the standard one for a
   week, so passes happen at the right time and place to within a couple of seconds.
 - Things that are artistic rather than measured: the faintest background stars, the cloud shapes,
-  the exact form of the aurora, the meteor rate (far higher than a real night), and the Moon and
-  Sun being drawn larger than life.
+  the exact form of the aurora, the meteor rate, and the Sun being drawn larger than life.
+  Dreamy also enlarges the Moon and strengthens star twinkle.
 
 ## Internet use
 
 The sky itself works offline. With "Live data" ticked, the page fetches satellite orbits from
 [celestrak.org](https://celestrak.org) about twice a day and the geomagnetic storm index from
 [NOAA](https://www.swpc.noaa.gov) every 20 minutes. Nothing about you is sent beyond an ordinary
-web request. Untick "Live data" to stop this; satellites then become anonymous random ones.
+web request. Untick "Live data" to stop this. Without real orbit data, only Dreamy adds anonymous
+simulated satellites; Real sky does not invent passes.
+
+**Real clouds** is off unless you tick it. When on, the page asks [Open-Meteo](https://open-meteo.com)
+for the cloud cover every half hour, sending the chosen latitude and longitude rounded to a tenth
+of a degree (about 10 km).
 
 The phone remote only works on your own network. Anyone on that network who knows the address can
 move the sliders, and nothing else in the folder is served.
@@ -97,9 +180,13 @@ move the sliders, and nothing else in the folder is served.
 | `js/astro.js` | Astronomy: Sun, Moon, planets, satellites, sidereal time |
 | `js/sky.js` | Drawing and controls |
 | `js/audio.js` | The generated music |
+| `js/sound-collection.js` | Shared sound collection and official-player links |
 | `data/sky-data.js` | Star catalogue and constellation figures |
 | `data/sky-images.js` | Milky Way and Moon images (optional; both are drawn by code if it is missing) |
+| `js/skylore.js` | The Aboriginal sky: names, places and figures |
 | `remote.html`, `khonshu_server.py`, `Start Khonshu.bat` | The phone remote |
+| `Khonshu Bedtime.bat` | One-click fullscreen start |
+| `PLAN.md` | Planned but unbuilt: black hole, comet, telescope zoom and an interstellar voyage |
 
 ## Credits
 
@@ -110,4 +197,10 @@ move the sliders, and nothing else in the folder is served.
 - Moon: NASA Scientific Visualization Studio, [CGI Moon Kit](https://svs.gsfc.nasa.gov/4720), from
   Lunar Reconnaissance Orbiter data. Public domain.
 - Planetary elements: JPL Solar System Dynamics. Lunar theory: Jean Meeus, *Astronomical Algorithms*.
-- Satellite orbits: CelesTrak. Storm index: NOAA Space Weather Prediction Center.
+- Aurora form and emission colours: NASA's [Auroras](https://science.nasa.gov/sun/auroras/) and
+  [The Polar Aurora](https://pwg.gsfc.nasa.gov/Education/waurora1.html). The animated curtain geometry is illustrative.
+- Satellite orbits: CelesTrak. Storm index: NOAA Space Weather Prediction Center. Cloud cover:
+  Open-Meteo.
+- Aboriginal sky: Boorong star names as recorded by William Stanbridge (1857) and discussed by
+  Hamacher and Frew (2010); the Emu in the Sky and Djulpan as described by Ray and Cilla Norris in
+  *Emu Dreaming* (2009). Any errors in this simplified selection are this project's.

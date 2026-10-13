@@ -40,18 +40,22 @@
     box-sizing: border-box; overflow: auto;
     padding: 16px 22px; background: rgba(9,13,25,.8);
     border: 1px solid rgba(160,180,255,.16); border-radius: 14px;
-    backdrop-filter: blur(8px); transition: opacity .6s;
+    backdrop-filter: blur(8px); transition: opacity .35s, visibility 0s;
   }
   body.intro #panel { display: none; }
-  body.idle #panel { opacity: 0; pointer-events: none; }
+  body.menu-hidden #panel {
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transition: opacity .35s, visibility 0s .35s;
+  }
   #panel label { display: flex; flex-direction: column; gap: 6px; letter-spacing: .06em; }
   #panel label > span { display: flex; justify-content: space-between; gap: 6px; }
   #panel output { opacity: .6; }
   #panel input[type=range] { width: 100%; margin: 0; accent-color: #8fa8ff; }
-  #panel input[type=number], #panel input[type=datetime-local], #panel select {
+  #panel input[type=number], #panel input[type=datetime-local], #panel input[type=time], #panel select {
     min-width: 0; box-sizing: border-box; padding: 2px 5px; font: inherit; color: #dfe6ff;
     background: rgba(140,165,255,.1); border: 1px solid rgba(170,190,255,.25); border-radius: 6px;
   }
+  #panel input[type=time] { width: 100%; }
   #panel input[type=number] { width: 50%; }
   #panel input[type=datetime-local] { flex: 1; width: 0; }
   #panel select { width: 100%; }
@@ -70,67 +74,126 @@
   #readout {
     grid-column: 1 / -1; max-width: 880px; opacity: .65; letter-spacing: .05em; font-variant-numeric: tabular-nums;
   }
+  #sound-library { grid-column: 1 / -1; border-top: 1px solid rgba(160,180,255,.12); padding-top: 10px; }
+  #sound-library summary { cursor: pointer; letter-spacing: .06em; }
+  #sound-library [data-sound-collection] { padding-top: 12px; max-width: 540px; }
+  #sound-library label { max-width: 340px; }
+  .sound-description, .sound-note { margin: 8px 0; }
+  .sound-note { font-size: 12px; opacity: .65; }
+  .sound-player { display: inline-block; padding: 7px 14px; border-radius: 999px; color: #dfe6ff;
+    text-decoration: none; background: rgba(140,165,255,.1); border: 1px solid rgba(170,190,255,.3); }
+  .sound-player:hover { background: rgba(140,165,255,.24); }
+  .sound-player[hidden] { display: none; }
   @media (max-width: 800px) {
     #panel { grid-template-columns: repeat(2, 1fr); }
     #panel .wide { grid-column: 1 / -1; }
   }
+
+  /* ceiling setup: replaces the control panel while it is open */
+  body.setting-up #panel { display: none; }
+  #setup {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+    width: min(620px, calc(100vw - 32px)); box-sizing: border-box; padding: 18px 22px;
+    background: rgba(9,13,25,.88); border: 1px solid rgba(160,180,255,.2); border-radius: 14px;
+  }
+  #setup[hidden] { display: none; }
+  #setup p { margin: 0 0 14px; font-size: 15px; }
+  #setup-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  #setup button {
+    padding: 8px 16px; font: inherit; color: #dfe6ff; background: rgba(140,165,255,.12);
+    border: 1px solid rgba(170,190,255,.3); border-radius: 999px; cursor: pointer;
+  }
+  #setup button:hover { background: rgba(140,165,255,.26); }
+  #setup-close { float: right; opacity: .7; }
 </style>
 </head>
-<body class="intro">
+<body class="intro menu-hidden">
 <canvas id="sky"></canvas>
 
 <div id="intro">
   <h1>KHONSHU</h1>
-  <p>night sky</p>
+  <p>a living night sky</p>
   <button id="begin">Begin</button>
-  <small>F fullscreen &nbsp;·&nbsp; M mute &nbsp;·&nbsp; C pin constellations &nbsp;·&nbsp; N pin names &nbsp;·&nbsp; A aurora &nbsp;·&nbsp; D daylight &nbsp;·&nbsp; L live time<br>
-    Space meteor &nbsp;·&nbsp; B fireball &nbsp;·&nbsp; S shower &nbsp;·&nbsp; click anything in the sky to identify it &nbsp;·&nbsp; move the mouse for controls</small>
+  <small>F fullscreen &nbsp;·&nbsp; M mute &nbsp;·&nbsp; C toggle constellations &nbsp;·&nbsp; N toggle names &nbsp;·&nbsp; A aurora &nbsp;·&nbsp; D daylight &nbsp;·&nbsp; L live time<br>
+    Space meteor &nbsp;·&nbsp; B fireball &nbsp;·&nbsp; S shower &nbsp;·&nbsp; T tour of tonight's sky &nbsp;·&nbsp; click anything in the sky to identify it<br>
+    Move the mouse over the menu area at the bottom for controls &nbsp;·&nbsp; H open controls &nbsp;·&nbsp; Esc hide controls</small>
 </div>
 
-<div id="panel">
-  <label><span>Meteors <output id="o-meteors"></output></span><input type="range" id="meteors" min="0" max="40" step="1"></label>
+<div id="panel" inert>
+  <label><span>Meteors <output id="o-meteors"></output></span><input type="range" id="meteors" min="0" max="40" step="0.1"></label>
   <label><span>Volume <output id="o-volume"></output></span><input type="range" id="volume" min="0" max="100" step="1"></label>
   <label><span>Brightness <output id="o-brightness"></output></span><input type="range" id="brightness" min="30" max="100" step="1"></label>
   <label title="How dark the site is: city lights hide the faint stars and the Milky Way"><span>Sky darkness <output id="o-darkness"></output></span><input type="range" id="darkness" min="0" max="100" step="5"></label>
   <label><span>Clouds <output id="o-clouds"></output></span><input type="range" id="clouds" min="0" max="100" step="5"></label>
 
-  <label title="Set this to the angle the picture covers from where you lie for a life-size sky"><span>Field of view <output id="o-fov"></output></span><input type="range" id="fov" min="20" max="180" step="5"></label>
+  <label title="Set this to the angle the picture covers from where you lie for a life-size sky"><span>Field of view <output id="o-fov"></output></span><input type="range" id="fov" min="20" max="180" step="1"></label>
   <label><span>Tilt <output id="o-tilt"></output></span><input type="range" id="tilt" min="0" max="90" step="1"></label>
   <label title="The compass direction at the bottom edge of the picture"><span>Facing <output id="o-facing"></output></span><input type="range" id="facing" min="0" max="359" step="1"></label>
   <label title="1× is true size"><span>Moon size <output id="o-moon"></output></span><input type="range" id="moon" min="1" max="20" step="1"></label>
   <label title="How strong a display to show. At 'real only' it appears just when a real geomagnetic storm reaches your latitude"><span>Aurora <output id="o-aurora"></output></span><input type="range" id="aurora" min="0" max="100" step="5"></label>
 
   <label><span>Time speed <output id="o-speed"></output></span><input type="range" id="speed" min="0" max="4" step="1"></label>
+  <label title="Enhance star twinkle and the motion of thin clouds. Natural keeps the quieter sky; this does not change the live clock."><span>Sky motion <output id="o-motion"></output></span><input type="range" id="motion" min="0" max="100" step="5"></label>
   <label><span>Place</span><select id="city"><option value="">Custom</option></select></label>
   <label><span>Latitude / longitude</span><span><input type="number" id="lat" min="-90" max="90" step="0.01"><input type="number" id="lon" min="-180" max="180" step="0.01"></span></label>
   <label title="Uses this computer's clock, whatever place is chosen"><span>Jump to a date</span><span><input type="datetime-local" id="when" min="1800-01-01T00:00" max="2099-12-31T23:59"><button id="go">Go</button></span></label>
-  <label><span>Music off after</span><select id="sleep">
+  <label title="Lower this if the picture stutters. It also lowers itself if frames keep arriving slowly."><span>Quality <output id="o-quality"></output></span><input type="range" id="quality" min="0" max="2" step="1"></label>
+  <label title="Crickets, frogs, leaves and a distant boobook owl, mixed in with the music"><span>Night sounds <output id="o-nature"></output></span><input type="range" id="nature" min="0" max="100" step="5"></label>
+  <label title="Which figures and names to show. The Aboriginal sky is a small selection from published accounts."><span>Sky culture</span><select id="culture">
+    <option value="western">Western</option><option value="aboriginal">Aboriginal</option>
+  </select></label>
+  <label title="The sky runs through dawn over the 25 minutes before this time, and the music rises with it. Leave empty for none."><span>Wake-up dawn</span><input type="time" id="alarm"></label>
+  <label title="Fades the music and the picture to black over the last three minutes"><span>Sleep timer</span><select id="sleep">
     <option value="0">Never</option><option value="15">15 minutes</option><option value="30">30 minutes</option>
     <option value="60">1 hour</option><option value="90">90 minutes</option>
   </select></label>
 
   <div class="row">
-    <label title="Otherwise the figures only show while you move the mouse"><input type="checkbox" id="lines"> Pin constellations</label>
-    <label title="Otherwise the names only show while you move the mouse"><input type="checkbox" id="names"> Pin names</label>
+    <label title="Show the menu when the pointer is over its area; hide it when the pointer leaves"><input type="checkbox" id="autoMenu"> Auto menu</label>
+    <label title="Turn all music and meteor audio on or off; shortcut M"><input type="checkbox" id="audio"> Sound on</label>
+    <label title="Show constellation lines; shortcut C"><input type="checkbox" id="lines"> Show constellations</label>
+    <label title="Show sky names and compass points; shortcut N"><input type="checkbox" id="names"> Show names</label>
     <label title="Sunset, dusk and dawn as they happen. Untick for night at any hour"><input type="checkbox" id="daylight"> Follow daylight</label>
     <label title="Real satellite orbits from celestrak.org and storm levels from noaa.gov"><input type="checkbox" id="online"> Live data</label>
     <label><input type="checkbox" id="mirror"> Mirror image</label>
     <label><input type="checkbox" id="sounds"> Meteor sounds</label>
+    <label title="Follow the real rate for tonight instead of the Meteors slider: a few an hour normally, far more at a shower's peak"><input type="checkbox" id="realMeteors"> Real meteor rate</label>
+    <label title="A soft chime and a note a few minutes before the space station appears"><input type="checkbox" id="issAlert"> ISS alert</label>
+    <label title="Match the clouds to the real sky. Sends the chosen place, rounded to about 10 km, to open-meteo.com"><input type="checkbox" id="weather"> Real clouds</label>
   </div>
   <div class="row">
+    <label>Sky style <select id="style">
+      <option value="real">Real sky</option><option value="dreamy">Dreamy</option>
+      <option value="sleep">Sleep</option><option value="custom" disabled>Custom</option>
+    </select></label>
     <button id="locate">Locate me</button>
     <button id="live">Live time</button>
+    <button id="turn" title="Run time at one minute per second to see Earth's rotation">Watch sky turn</button>
+    <button id="tour" title="Rings one thing at a time in tonight's sky and says what it is; shortcut T">Tour</button>
+    <button id="setup-open" title="Three questions that set mirroring, direction and life-size scale for a ceiling">Ceiling setup</button>
     <span class="spacer"></span>
     <button id="shower">Meteor shower</button>
     <button id="fs">Fullscreen</button>
   </div>
+  <details id="sound-library">
+    <summary>Sound collection</summary>
+    <div data-sound-collection></div>
+  </details>
   <div id="readout"></div>
+</div>
+
+<div id="setup" hidden>
+  <button id="setup-close">Close</button>
+  <p id="setup-text"></p>
+  <div id="setup-choices"></div>
 </div>
 
 <script src="data/sky-data.js"></script>
 <script src="data/sky-images.js"></script>
 <script src="js/astro.js"></script>
 <script src="js/audio.js"></script>
+<script src="js/skylore.js"></script>
+<script src="js/sound-collection.js"></script>
 <script src="js/sky.js"></script>
 </body>
 </html>

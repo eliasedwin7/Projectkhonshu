@@ -1,10 +1,11 @@
 // Sleep music for the Khonshu night sky: slow, organ-like chords drifting over a deep drone and a
 // soft wash of noise, synthesised live so it never loops. Nothing has a sharp start, and every
-// note beats gently against a slightly detuned twin.
+// note beats gently against a slightly detuned twin. A separate layer of night sounds (crickets,
+// frogs, an owl) can be mixed in.
 const SkyAudio = (() => {
 'use strict';
 
-let ac = null, master, verb, padBus, noiseBuf, muted = false, volume = 0.6, current = 0;
+let ac = null, master, verb, padBus, natureBus, noiseBuf, muted = false, volume = 0.6, nature = 0, current = 0;
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
@@ -40,7 +41,7 @@ function impulse(seconds) {
 function start() {
   if (ac) { ac.resume(); return; }
   ac = new (window.AudioContext || window.webkitAudioContext)();
-  master = gain(0.0001);
+  master = gain(0);
   const comp = ac.createDynamicsCompressor();
   comp.threshold.value = -20; comp.ratio.value = 2.5; comp.attack.value = 0.2; comp.release.value = 1;
   master.connect(comp).connect(ac.destination);
@@ -76,9 +77,113 @@ function start() {
     o.start();
   });
 
+  startNature();
   master.gain.setTargetAtTime(targetGain(), ac.currentTime, 4);
   chord(0);
   setTimeout(shimmer, 30000);
+}
+
+// ───────────────────────── night sounds ─────────────────────────
+// Crickets, frogs, a boobook owl and leaves in the wind, all synthesised. They share one bus so
+// a single slider mixes them against the music.
+
+// an oscillator turned into an on/off gate that is open for the given share of each cycle
+function gate(freq, duty, param) {
+  const o = ac.createOscillator(), shaper = ac.createWaveShaper(), curve = new Float32Array(257);
+  const threshold = Math.cos(Math.PI * duty);
+  for (let i = 0; i < 257; i++) curve[i] = clamp((i / 128 - 1 - threshold) / 0.15, 0, 1);
+  shaper.curve = curve; o.frequency.value = freq;
+  o.connect(shaper).connect(param); o.start();
+}
+
+function startNature() {
+  natureBus = gain(nature);
+  natureBus.connect(master);
+  natureBus.connect(gain(0.35)).connect(verb);
+
+  // crickets: a high tone gated twice over, by the buzz of the wings and by the rhythm of the chirps
+  for (let i = 0; i < 6; i++) {
+    const carrier = ac.createOscillator(), wings = gain(0), rhythm = gain(0), level = 0.006 + Math.random() * 0.006;
+    const out = gain(level), pan = ac.createStereoPanner();
+    carrier.frequency.value = 3900 + Math.random() * 1400;
+    pan.pan.value = Math.random() * 1.8 - 0.9;
+    gate(26 + Math.random() * 12, 0.5, wings.gain);
+    gate(1.3 + Math.random() * 1.5, 0.3 + Math.random() * 0.15, rhythm.gain);
+    carrier.connect(wings).connect(rhythm).connect(out).connect(pan).connect(natureBus);
+    lfo(0.02 + Math.random() * 0.05, level * 0.8, out.gain);   // each one drifts in and out
+    carrier.start();
+  }
+
+  // leaves stirring
+  const rustle = ac.createBufferSource(), leaves = gain(0.004);
+  rustle.buffer = noiseBuf; rustle.loop = true;
+  rustle.connect(filter('bandpass', 1800, 0.7)).connect(leaves).connect(natureBus);
+  lfo(0.07, 0.0022, leaves.gain); lfo(0.031, 0.0016, leaves.gain);
+  rustle.start(0, Math.random() * 4);
+
+  setTimeout(frog, 9000);
+  setTimeout(owl, 70000);
+}
+
+// a few creaking croaks: a slow sawtooth ringing a narrow filter
+function frog() {
+  const t0 = ac.currentTime + 0.05, count = 2 + Math.floor(Math.random() * 4), gap = 0.32 + Math.random() * 0.1;
+  const o = ac.createOscillator(), g = gain(0), pan = ac.createStereoPanner();
+  o.type = 'sawtooth'; o.frequency.value = 24 + Math.random() * 8;
+  pan.pan.value = Math.random() * 1.8 - 0.9;
+  g.gain.setValueAtTime(0, t0);
+  for (let k = 0; k < count; k++) {
+    const t = t0 + k * gap;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.11, t + 0.03);
+    g.gain.linearRampToValueAtTime(0, t + 0.2);
+  }
+  o.connect(filter('bandpass', 520 + Math.random() * 260, 7)).connect(g).connect(pan).connect(natureBus);
+  o.start(t0); o.stop(t0 + count * gap + 0.3);
+  o.onended = () => pan.disconnect();
+  setTimeout(frog, (6 + Math.random() * 16) * 1000);
+}
+
+// the two-note "boo-book" of the southern boobook, repeated a few times from somewhere far off
+function owl() {
+  const t0 = ac.currentTime + 0.1, calls = 3 + Math.floor(Math.random() * 4), pan = ac.createStereoPanner();
+  pan.pan.value = Math.random() * 1.6 - 0.8;
+  pan.connect(natureBus);
+  let last = null;
+  for (let k = 0; k < calls * 2; k++) {
+    const t = t0 + Math.floor(k / 2) * 1.9 + (k % 2) * 0.42, freq = k % 2 ? 470 : 560;
+    const o = last = ac.createOscillator(), g = gain(0);
+    o.frequency.setValueAtTime(freq, t);
+    o.frequency.linearRampToValueAtTime(freq * 0.96, t + 0.3);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.03, t + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.36);
+    o.connect(g).connect(pan);
+    o.start(t); o.stop(t + 0.4);
+  }
+  last.onended = () => pan.disconnect();
+  setTimeout(owl, (150 + Math.random() * 240) * 1000);
+}
+
+// two soft notes, used to announce a satellite pass
+function chime() {
+  if (!ac || ac.state !== 'running') return;
+  [[76, 0], [81, 0.7]].forEach(([m, delay]) => {
+    const t = ac.currentTime + 0.05 + delay, o = ac.createOscillator(), g = gain(0);
+    o.frequency.value = mtof(m);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.03, t + 0.08);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 3.5);
+    o.connect(g);
+    g.connect(verb); g.connect(gain(0.5)).connect(master);
+    o.start(t); o.stop(t + 3.6);
+    o.onended = () => g.disconnect();
+  });
+}
+
+function setNature(v) {
+  nature = v;
+  if (ac) natureBus.gain.setTargetAtTime(v, ac.currentTime, 0.5);
 }
 
 // one swelling tone: sine partials plus a twin a fraction of a hertz away, for a slow beat
@@ -135,12 +240,20 @@ function meteor(panPos, mag, fire) {
   src.onended = () => pan.disconnect();
 }
 
-const targetGain = () => muted ? 0.0001 : Math.max(0.0001, volume * 0.9);
+const targetGain = () => muted ? 0 : volume * 0.9;
 function setVolume(v) {
-  volume = v;
-  if (ac) master.gain.setTargetAtTime(targetGain(), ac.currentTime, 0.6);
+  volume = clamp(v, 0, 1);
+  if (ac) {
+    const t = ac.currentTime, currentGain = master.gain.value;
+    master.gain.cancelScheduledValues(t);
+    master.gain.setValueAtTime(currentGain, t);
+    master.gain.linearRampToValueAtTime(targetGain(), t + 0.25);
+  }
 }
-function toggleMute() { muted = !muted; setVolume(volume); }
+function setMuted(value) {
+  if (muted === value) return;
+  muted = value; setVolume(volume);
+}
 
-return { start, meteor, setVolume, toggleMute };
+return { start, meteor, chime, setVolume, setNature, setMuted };
 })();

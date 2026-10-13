@@ -20,7 +20,7 @@
   output { opacity: .6; }
   input[type=range] { width: 100%; margin: 0; height: 30px; accent-color: #8fa8ff; }
   .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  button, select, input[type=datetime-local] {
+  button, select, input[type=datetime-local], input[type=time] {
     width: 100%; box-sizing: border-box; padding: 13px 10px; font: inherit; color: #dfe6ff;
     background: rgba(140,165,255,.12); border: 1px solid rgba(170,190,255,.3); border-radius: 12px;
   }
@@ -29,6 +29,12 @@
   .checks input { width: 20px; height: 20px; accent-color: #8fa8ff; }
   .pair { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
   .pair button { width: auto; padding: 13px 22px; }
+  .sound-description, .sound-note { margin: 8px 0; }
+  .sound-note { font-size: 12.5px; opacity: .65; }
+  .sound-player { display: inline-block; box-sizing: border-box; max-width: 100%; padding: 13px 14px;
+    color: #dfe6ff; text-decoration: none; background: rgba(140,165,255,.12);
+    border: 1px solid rgba(170,190,255,.3); border-radius: 12px; }
+  .sound-player[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -37,46 +43,63 @@
 
 <section>
   <h2>Sky</h2>
+  <label><span>Sky style</span><select id="style">
+    <option value="real">Real sky</option><option value="dreamy">Dreamy</option>
+    <option value="sleep">Sleep</option><option value="custom" disabled>Custom</option>
+  </select></label>
   <div class="buttons">
     <button data-action="meteor">Meteor</button>
     <button data-action="fireball">Fireball</button>
     <button data-action="shower">Meteor shower</button>
     <button data-action="mute">Mute</button>
+    <button data-action="tour">Tour of tonight's sky</button>
   </div>
 </section>
 
 <section>
   <h2>Picture and sound</h2>
+  <div class="checks"><label><input type="checkbox" data-key="audio"> Sound on</label></div>
   <label><span>Volume <output></output></span><input type="range" data-key="volume" min="0" max="100" step="1"></label>
   <label><span>Brightness <output></output></span><input type="range" data-key="brightness" min="30" max="100" step="1"></label>
-  <label><span>Music off after</span><select id="sleep">
+  <label><span>Night sounds <output></output></span><input type="range" data-key="nature" min="0" max="100" step="5"></label>
+  <label><span>Sleep timer (music and picture)</span><select id="sleep">
     <option value="0">Never</option><option value="15">15 minutes</option><option value="30">30 minutes</option>
     <option value="60">1 hour</option><option value="90">90 minutes</option>
   </select></label>
+  <label><span>Wake-up dawn</span><div class="pair"><input type="time" id="alarm"><button id="alarm-clear">Clear</button></div></label>
+</section>
+
+<section>
+  <h2>Sound collection</h2>
+  <div data-sound-collection></div>
 </section>
 
 <section>
   <h2>Atmosphere</h2>
+  <label title="Enhance twinkle and cloud movement without changing the clock"><span>Sky motion <output></output></span><input type="range" data-key="motion" min="0" max="100" step="5"></label>
   <label><span>Aurora <output></output></span><input type="range" data-key="aurora" min="0" max="100" step="5"></label>
   <label><span>Clouds <output></output></span><input type="range" data-key="clouds" min="0" max="100" step="5"></label>
   <label><span>Sky darkness <output></output></span><input type="range" data-key="darkness" min="0" max="100" step="5"></label>
-  <label><span>Meteors per minute <output></output></span><input type="range" data-key="meteors" min="0" max="40" step="1"></label>
+  <label><span>Meteors per minute <output></output></span><input type="range" data-key="meteors" min="0" max="40" step="0.1"></label>
   <label><span>Moon size <output></output></span><input type="range" data-key="moon" min="1" max="20" step="1"></label>
 </section>
 
 <section class="checks">
   <h2>Show</h2>
+  <label><input type="checkbox" data-key="autoMenu"> Auto-hide projector menu</label>
   <label><input type="checkbox" data-key="lines"> Constellations</label>
   <label><input type="checkbox" data-key="names"> Names</label>
   <label><input type="checkbox" data-key="daylight"> Follow daylight</label>
   <label><input type="checkbox" data-key="sounds"> Meteor sounds</label>
+  <label><input type="checkbox" data-key="realMeteors"> Real meteor rate</label>
+  <label><input type="checkbox" data-key="issAlert"> ISS alert</label>
 </section>
 
 <section>
   <h2>Time</h2>
   <label><span>Speed <output id="o-speed"></output></span><input type="range" id="speed" min="0" max="4" step="1"></label>
   <div class="pair"><input type="datetime-local" id="when"><button id="go">Go</button></div>
-  <div class="buttons" style="margin-top: 10px"><button data-action="live">Back to now</button></div>
+  <div class="buttons" style="margin-top: 10px"><button data-action="live">Back to now</button><button data-action="turn">Watch sky turn</button></div>
 </section>
 
 <section>
@@ -86,6 +109,7 @@
   <label><span>Facing <output></output></span><input type="range" data-key="facing" min="0" max="359" step="1"></label>
 </section>
 
+<script src="js/sound-collection.js"></script>
 <script>
 (() => {
 'use strict';
@@ -94,6 +118,7 @@ const $ = id => document.getElementById(id);
 const sliders = [...document.querySelectorAll('input[type=range][data-key]')];
 const checks = [...document.querySelectorAll('input[type=checkbox][data-key]')];
 let touched = 0;   // don't let a status refresh fight with a slider being dragged
+let issSoon = false;
 
 function send(command) {
   touched = Date.now();
@@ -112,6 +137,9 @@ for (const button of document.querySelectorAll('button[data-action]')) {
 }
 $('speed').addEventListener('input', e => { $('o-speed').textContent = SPEED_LABELS[e.target.value]; send({ speed: +e.target.value }); });
 $('sleep').addEventListener('change', e => send({ sleep: +e.target.value }));
+$('style').addEventListener('change', e => send({ style: e.target.value }));
+$('alarm').addEventListener('change', e => send({ set: { alarm: e.target.value } }));
+$('alarm-clear').addEventListener('click', () => { $('alarm').value = ''; send({ set: { alarm: '' } }); });
 $('go').addEventListener('click', () => {
   const ms = new Date($('when').value).getTime();
   if (Number.isFinite(ms)) send({ time: ms });
@@ -123,10 +151,17 @@ async function refresh() {
     $('status').textContent = state.status
       ? (state.started ? '' : 'Press Begin on the sky to start it.  ') + state.status.replace(/\s+·\s+Phone remote.*/, '')
       : 'Waiting for the sky: open it on the projector computer.';
+    // buzz once when the space station is a few minutes away
+    const soon = /ISS appears in/.test(state.status || '');
+    if (soon && !issSoon && navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    issSoon = soon;
     if (state.settings && Date.now() - touched > 2500) {
       for (const input of sliders) { input.value = state.settings[input.dataset.key]; show(input); }
       for (const input of checks) input.checked = !!state.settings[input.dataset.key];
       $('speed').value = state.speed || 0; $('o-speed').textContent = SPEED_LABELS[state.speed || 0];
+      $('style').value = state.settings.style || 'custom';
+      $('alarm').value = state.settings.alarm || '';
+      document.querySelector('[data-action="mute"]').textContent = state.settings.audio === false ? 'Unmute' : 'Mute';
     }
   } catch {
     $('status').textContent = 'Cannot reach the sky. Is "Start Khonshu" still running?';
