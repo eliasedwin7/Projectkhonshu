@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#05070f">
+<title>Khonshu remote</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; padding: 18px 16px 40px; background: #05070f; color: #c9d2ea;
+    font: 15px/1.4 system-ui, "Segoe UI", sans-serif; -webkit-tap-highlight-color: transparent;
+  }
+  h1 { margin: 4px 0 2px; font-weight: 200; letter-spacing: .5em; font-size: 22px; color: #eef2ff; }
+  #status { min-height: 3.6em; margin: 0 0 14px; font-size: 12.5px; opacity: .65; }
+  section { margin: 0 0 14px; padding: 14px 16px; background: rgba(140,165,255,.06); border: 1px solid rgba(160,180,255,.16); border-radius: 14px; }
+  h2 { margin: 0 0 10px; font-size: 11px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; opacity: .6; }
+  label { display: block; margin: 0 0 12px; }
+  label span { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  output { opacity: .6; }
+  input[type=range] { width: 100%; margin: 0; height: 30px; accent-color: #8fa8ff; }
+  .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  button, select, input[type=datetime-local] {
+    width: 100%; box-sizing: border-box; padding: 13px 10px; font: inherit; color: #dfe6ff;
+    background: rgba(140,165,255,.12); border: 1px solid rgba(170,190,255,.3); border-radius: 12px;
+  }
+  button:active { background: rgba(140,165,255,.3); }
+  .checks label { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; }
+  .checks input { width: 20px; height: 20px; accent-color: #8fa8ff; }
+  .pair { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+  .pair button { width: auto; padding: 13px 22px; }
+</style>
+</head>
+<body>
+<h1>KHONSHU</h1>
+<p id="status">Connecting…</p>
+
+<section>
+  <h2>Sky</h2>
+  <div class="buttons">
+    <button data-action="meteor">Meteor</button>
+    <button data-action="fireball">Fireball</button>
+    <button data-action="shower">Meteor shower</button>
+    <button data-action="mute">Mute</button>
+  </div>
+</section>
+
+<section>
+  <h2>Picture and sound</h2>
+  <label><span>Volume <output></output></span><input type="range" data-key="volume" min="0" max="100" step="1"></label>
+  <label><span>Brightness <output></output></span><input type="range" data-key="brightness" min="30" max="100" step="1"></label>
+  <label><span>Music off after</span><select id="sleep">
+    <option value="0">Never</option><option value="15">15 minutes</option><option value="30">30 minutes</option>
+    <option value="60">1 hour</option><option value="90">90 minutes</option>
+  </select></label>
+</section>
+
+<section>
+  <h2>Atmosphere</h2>
+  <label><span>Aurora <output></output></span><input type="range" data-key="aurora" min="0" max="100" step="5"></label>
+  <label><span>Clouds <output></output></span><input type="range" data-key="clouds" min="0" max="100" step="5"></label>
+  <label><span>Sky darkness <output></output></span><input type="range" data-key="darkness" min="0" max="100" step="5"></label>
+  <label><span>Meteors per minute <output></output></span><input type="range" data-key="meteors" min="0" max="40" step="1"></label>
+  <label><span>Moon size <output></output></span><input type="range" data-key="moon" min="1" max="20" step="1"></label>
+</section>
+
+<section class="checks">
+  <h2>Show</h2>
+  <label><input type="checkbox" data-key="lines"> Constellations</label>
+  <label><input type="checkbox" data-key="names"> Names</label>
+  <label><input type="checkbox" data-key="daylight"> Follow daylight</label>
+  <label><input type="checkbox" data-key="sounds"> Meteor sounds</label>
+</section>
+
+<section>
+  <h2>Time</h2>
+  <label><span>Speed <output id="o-speed"></output></span><input type="range" id="speed" min="0" max="4" step="1"></label>
+  <div class="pair"><input type="datetime-local" id="when"><button id="go">Go</button></div>
+  <div class="buttons" style="margin-top: 10px"><button data-action="live">Back to now</button></div>
+</section>
+
+<section>
+  <h2>View</h2>
+  <label><span>Field of view <output></output></span><input type="range" data-key="fov" min="20" max="180" step="5"></label>
+  <label><span>Tilt <output></output></span><input type="range" data-key="tilt" min="0" max="90" step="1"></label>
+  <label><span>Facing <output></output></span><input type="range" data-key="facing" min="0" max="359" step="1"></label>
+</section>
+
+<script>
+(() => {
+'use strict';
+const SPEED_LABELS = ['live', '10×', '1 min/s', '10 min/s', '1 h/s'];
+const $ = id => document.getElementById(id);
+const sliders = [...document.querySelectorAll('input[type=range][data-key]')];
+const checks = [...document.querySelectorAll('input[type=checkbox][data-key]')];
+let touched = 0;   // don't let a status refresh fight with a slider being dragged
+
+function send(command) {
+  touched = Date.now();
+  fetch('api/command', { method: 'POST', body: JSON.stringify(command) }).catch(() => {});
+}
+const show = input => { input.closest('label').querySelector('output').textContent = input.value; };
+
+for (const input of sliders) {
+  input.addEventListener('input', () => { show(input); send({ set: { [input.dataset.key]: +input.value } }); });
+}
+for (const input of checks) {
+  input.addEventListener('change', () => send({ set: { [input.dataset.key]: input.checked } }));
+}
+for (const button of document.querySelectorAll('button[data-action]')) {
+  button.addEventListener('click', () => send({ action: button.dataset.action }));
+}
+$('speed').addEventListener('input', e => { $('o-speed').textContent = SPEED_LABELS[e.target.value]; send({ speed: +e.target.value }); });
+$('sleep').addEventListener('change', e => send({ sleep: +e.target.value }));
+$('go').addEventListener('click', () => {
+  const ms = new Date($('when').value).getTime();
+  if (Number.isFinite(ms)) send({ time: ms });
+});
+
+async function refresh() {
+  try {
+    const state = await (await fetch('api/state')).json();
+    $('status').textContent = state.status
+      ? (state.started ? '' : 'Press Begin on the sky to start it.  ') + state.status.replace(/\s+·\s+Phone remote.*/, '')
+      : 'Waiting for the sky: open it on the projector computer.';
+    if (state.settings && Date.now() - touched > 2500) {
+      for (const input of sliders) { input.value = state.settings[input.dataset.key]; show(input); }
+      for (const input of checks) input.checked = !!state.settings[input.dataset.key];
+      $('speed').value = state.speed || 0; $('o-speed').textContent = SPEED_LABELS[state.speed || 0];
+    }
+  } catch {
+    $('status').textContent = 'Cannot reach the sky. Is "Start Khonshu" still running?';
+  }
+}
+refresh();
+setInterval(refresh, 3000);
+})();
+</script>
+</body>
+</html>
