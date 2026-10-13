@@ -29,6 +29,10 @@ to reveal the controls. Moving it away hides the menu after a short fade, even i
 has focus. Untick **Auto menu** to keep the controls visible. The phone remote has the same setting.
 For keyboard access, **H** opens and focuses the menu; **Esc** hides it in Auto mode.
 
+The compact bedtime menu puts **Start night**, **Sound on**, **Volume**, **Brightness** and
+**Sleep timer** first. **Advanced** holds astronomy, animations and projector alignment.
+**Tonight’s sky** opens the detailed live readout. The footer identifies the running release.
+
 **Sky style** offers three presets on the projector and phone remote:
 
 - **Real sky** is the default: a faint, mostly grey Milky Way, gentle twinkle, a true-size Moon,
@@ -73,19 +77,35 @@ reveals the controls. Click any star, planet, satellite or deep-sky object to se
 **Sound on** toggles all music and meteor audio, keeping your volume setting. The toggle is on
 the sky and phone remote; **M** does the same thing. Your sound preference is saved for next time.
 
-**Sound collection** is available in the sky menu and on the phone remote. It includes Khonshu's
-offline ambience, [myNoise Black Hole](https://mynoise.net/NoiseMachines/intergalacticSoundscapeGenerator.php),
-[SomaFM Drone Zone](https://somafm.com/dronezone/) and
-[SomaFM Deep Space One](https://somafm.com/deepspaceone/).
-Choose an entry and use **Open player** to launch its official player in another tab. Your choice
-is remembered. External players need internet access and have their own playback and volume controls;
-Khonshu's sound toggle and sleep timer apply only to its built-in audio. Turn **Sound on** off in
-Khonshu when listening to an external player to avoid overlapping sound.
+**Sound collection** includes four generated soundscapes: **Khonshu ambient**, **Deep space**,
+**Weightless** and **Quiet hush**. Mix **Drone**, **Pads** and **Air** independently. These work
+offline and share the main volume, mute and sleep timer.
+
+**Add your tracks** imports audio files into this browser's private device storage. Tracks loop
+inside Khonshu and use the same audio controls and fade-out. Files are never uploaded; the phone
+remote receives only track names and can select or pause them on the projector. Removing a track
+removes the browser's copy and leaves your original file alone. If browser storage is unavailable,
+imports work for the current session only. Your browser must support the file's audio format.
+
+The collection retains [myNoise Black Hole](https://mynoise.net/NoiseMachines/intergalacticSoundscapeGenerator.php),
+[SomaFM Drone Zone](https://somafm.com/dronezone/) and [Deep Space One](https://somafm.com/deepspaceone/)
+as external-player links. Opening one mutes Khonshu's audio to avoid overlap. External players
+need internet and use their own volume and timer; the integrated timer applies to generated sounds
+and imported files.
 
 ## Sleeping and waking
 
-- **Sleep timer** fades the music and the picture to black over its last three minutes. Moving the
-  mouse brings the sky back.
+- **Start night** starts a quiet session with Sleep lock and your chosen timer, or one hour if
+  none was selected. It keeps your chosen sound, reduces volume to at most 30% and brightness to
+  at most 60%, and never raises either if you had already lowered it further.
+- **Sleep lock** silences ISS alerts, stops tours, visions and voyages, and hides sky overlays.
+  Mouse movement cannot reopen the menu or cancel a fade. **H** or a deliberate click over the
+  menu area reveals the controls; **Wake** or **W** unlocks and cancels the timer. Scheduled dawn
+  also releases the lock. Your previous alert and overlay preferences are retained.
+  Once fully asleep, the app suspends audio processing and checks the clock at one redraw per
+  second, avoiding heavy sky rendering while keeping scheduled dawn available.
+- **Sleep timer** fades generated music or imported tracks, and the picture, to black over its
+  last three minutes. Without Sleep lock, moving the mouse brings the sky back.
 - **Wake-up dawn** takes a time of day. Over the 25 minutes before it, the sky runs through dawn
   with a Sun rising in the east, whatever the real Sun is doing, and the music rises with it. It
   repeats every day until you clear the time. The computer must stay on overnight.
@@ -143,12 +163,33 @@ close up. Click elsewhere to close it.
 
 **Quality** (low, medium, high) trades sharpness for speed. If the picture stutters for several
 seconds, Khonshu lowers it by itself and says so in the status line.
+**Animation speed** defaults to a quieter 30 fps; choose 60 fps for more frequent redraws.
+The Advanced drawer reports measured frame rate and selected quality. Brightness changes ease
+into place, background stars use more independent shimmer groups, and cloud textures do less
+work per update while keeping their motion smooth. Actual frame rate depends on the computer.
+
+## Install and use offline
+
+The built, hosted site can be installed through **Install app** when the browser offers it, or
+through the browser's install/Add to Home Screen menu. After the footer says **Saved for offline
+use**, the sky, built-in sounds and imported tracks can reopen without internet. Live astronomy
+feeds, weather and external radio need a connection. The local Python phone remote still requires
+the server and the same Wi-Fi.
+
+New releases download in the background. **Update ready** applies a complete saved release after
+you explicitly choose it; it cannot interrupt Sleep lock. Closing the app or browser ends playback
+and its session timer, so keep it open for overnight sessions.
+
+Cloudflare's connected GitHub Builds publishes main; GitHub Actions validates changes.
+Build settings and version information are described in
+[DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Keys
 
 | Key | Action | Key | Action |
 |---|---|---|---|
 | T | Tour of tonight's sky | H | Open the menu |
+| W | Wake from Sleep lock | | |
 | V | Voyage | K | Black hole |
 | U | Supernova | O | Comet |
 | E | Replay the next lunar eclipse | | |
@@ -222,6 +263,9 @@ move the sliders, and nothing else in the folder is served.
 | `js/sky.js` | Drawing and controls |
 | `js/audio.js` | The generated music |
 | `js/sound-collection.js` | Shared sound collection and official-player links |
+| `js/bedtime.js`, `css/bedtime.css` | Compact bedtime menu and advanced controls |
+| `js/app.js`, `sw.js`, `manifest.webmanifest` | Installation, versioned offline assets and update handling |
+| `scripts/`, `tests/`, `wrangler.jsonc` | Deployment build, checks and Cloudflare configuration |
 | `data/sky-data.js` | Star catalogue and constellation figures |
 | `data/sky-images.js` | Milky Way and Moon images (optional; both are drawn by code if it is missing) |
 | `js/skylore.js` | The Aboriginal sky: names, places and figures |

@@ -13,9 +13,9 @@ const { RAD, sind, cosd, clamp, dot, cross, norm, apply, mul3, toVec } = Astro;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 // "realMeteors" replaces the meteor slider with the rate a real night would give.
 const PRESETS = {
-  real: { motion: reducedMotion ? 0 : 25, aurora: 0, moon: 1, meteors: 0.2, realMeteors: true, clouds: 15, daylight: true, sounds: false, brightness: 100, visions: 'off' },
-  dreamy: { motion: reducedMotion ? 0 : 70, aurora: 65, moon: 3, meteors: 3, realMeteors: false, clouds: 15, daylight: false, sounds: false, brightness: 100, visions: 'rare' },
-  sleep: { motion: reducedMotion ? 0 : 10, aurora: 0, moon: 1, meteors: 0, realMeteors: false, clouds: 20, daylight: false, sounds: false, brightness: 60, volume: 30, visions: 'off' },
+  real: { motion: reducedMotion ? 0 : 25, aurora: 0, moon: 1, meteors: 0.2, realMeteors: true, clouds: 15, daylight: true, sounds: false, brightness: 100, visions: 'off', sleepLock: false },
+  dreamy: { motion: reducedMotion ? 0 : 70, aurora: 65, moon: 3, meteors: 3, realMeteors: false, clouds: 15, daylight: false, sounds: false, brightness: 100, visions: 'rare', sleepLock: false },
+  sleep: { motion: reducedMotion ? 0 : 10, aurora: 0, moon: 1, meteors: 0, realMeteors: false, clouds: 20, daylight: false, sounds: false, brightness: 60, volume: 30, visions: 'off', sleepLock: true },
 };
 // "visions" is how often imagined events (js/visions.js) appear by themselves: off, rare or often.
 // "quality" is 0–2 (low to high). "nature" is the level of the night sounds. "alarm" is a wake
@@ -26,6 +26,7 @@ const DEFAULTS = {
   sounds: false, audio: true, autoMenu: true, motion: reducedMotion ? 0 : 25, style: 'real',
   realMeteors: true, quality: 2, nature: 20, culture: 'western', alarm: '', issAlert: true, weather: false,
   visions: 'off',
+  sleepLock: false, fps: 30, soundSource: 'khonshu', droneMix: 70, padsMix: 70, airMix: 35,
 };
 const STORE_KEY = 'khonshu-settings-v5';
 const savedSettings = loadJSON(STORE_KEY);
@@ -240,7 +241,7 @@ const visible = mag => clamp((env.limMag - mag) / 1.2, 0, 1);
 const STAR_COLORS = [[255,255,255], [205,218,255], [172,193,255], [255,244,230], [255,222,182], [255,194,154]];
 const COLOR_NAMES = ['white', 'blue-white', 'blue', 'yellow-white', 'orange', 'red-orange'];
 const FAINT_TINTS = ['#e6ecff', '#fff3e4', '#dfe8ff', '#ffffff', '#ffeeda'];
-const SPRITE_MAG = 4.5, PHASES = 5;
+const SPRITE_MAG = 4.5, PHASES = 13;
 // dim-star levels: 0–2 are the generated background (mag 6–7.5), 3–5 are catalogue stars (mag 4.5–6)
 const LEVEL_ALPHA = [0.3, 0.42, 0.55, 0.7, 0.8, 0.9];
 const LEVEL_SIZE = [0.9, 1.0, 1.1, 1.25, 1.45, 1.7];
@@ -967,7 +968,7 @@ function drawAurora(t) {
 // ───────────────────────── clouds ─────────────────────────
 // Two noise fields evolve through each other. Local warping makes wisps grow
 // and dissolve while two sheets advect them at different speeds.
-const CLOUD_SIZE = 256;
+const CLOUD_SIZE = 128;
 const cloudTile = document.createElement('canvas'), cloudLayer = document.createElement('canvas');
 const cloudCtx = cloudLayer.getContext('2d');
 cloudTile.width = cloudTile.height = CLOUD_SIZE;
@@ -1022,10 +1023,11 @@ function bakeClouds(t = nowSec(), updateCover = true) {
   for (let y = 0; y < CLOUD_SIZE; y++) {
     for (let x = 0; x < CLOUD_SIZE; x++) {
       const i = (y * CLOUD_SIZE + x) * 4;
-      const wx = 9 * Math.sin(y * 0.024 + phase) + 4 * Math.sin(x * 0.037 - phase * 0.7);
-      const wy = 6 * Math.sin(x * 0.026 - phase * 0.8);
+      const ratio = CLOUD_SIZE / 256;
+      const wx = (9 * Math.sin(y * 0.024 / ratio + phase) + 4 * Math.sin(x * 0.037 / ratio - phase * 0.7)) * ratio;
+      const wy = 6 * Math.sin(x * 0.026 / ratio - phase * 0.8) * ratio;
       const density = 0.7 * sampleCloud(cloudNoise, x + wx, y + wy)
-        + 0.3 * sampleCloud(cloudDetail, x - t * (0.3 + 0.4 * life), y + t * 0.16);
+        + 0.3 * sampleCloud(cloudDetail, x - t * (0.3 + 0.4 * life) * ratio, y + t * 0.16 * ratio);
       const opacity = clamp((density - cloudThreshold + 0.025) / 0.14, 0, 1);
       d[i] = d[i + 1] = d[i + 2] = 255;
       d[i + 3] = opacity * opacity * (3 - 2 * opacity) * 235;
@@ -1051,7 +1053,7 @@ function drawClouds(t) {
     const stretch = 1 + 0.035 * Math.sin(t * 0.045 + scale);
     cloudPattern.setTransform(new DOMMatrix()
       .translate(t * vx * drift * unit * q, t * vy * drift * unit * q)
-      .scale(scale * unit * q * 1.7 * stretch, scale * unit * q / stretch));
+      .scale(scale * unit * q * 1.7 * stretch * 256 / CLOUD_SIZE, scale * unit * q / stretch * 256 / CLOUD_SIZE));
     cloudCtx.globalAlpha = alpha; cloudCtx.fillStyle = cloudPattern;
     cloudCtx.fillRect(0, 0, w, h);
   }
@@ -1116,6 +1118,7 @@ function pickRadiant(now) {
 }
 
 function meteorRate(now) {
+  if (settings.sleepLock) return 0;
   if (now < showerUntil) return Math.max(settings.meteors, 6) * 10;
   return settings.realMeteors ? realMeteorRate : settings.meteors;
 }
@@ -1125,6 +1128,7 @@ function scheduleMeteor(now) {
 }
 
 function spawnMeteor(now, opts = {}) {
+  if (settings.sleepLock) return;
   const diag = Math.hypot(W, H);
   const fire = opts.fireball ?? Math.random() < 0.005;
   const x0 = W * (0.05 + Math.random() * 0.9), y0 = H * (0.05 + Math.random() * 0.9);
@@ -1253,7 +1257,7 @@ function drawDim(t) {
       + 0.35 * Math.sin(t * (1.3 + 0.17 * level) + ph * 3.1);
     const amplitude = (0.06 + 0.18 * life) * (1 - fx.lift);
     ctx.globalAlpha = LEVEL_ALPHA[level] * vis * (1 - amplitude + amplitude * shimmer);
-    ctx.fillStyle = FAINT_TINTS[ph];
+    ctx.fillStyle = FAINT_TINTS[ph % FAINT_TINTS.length];
     ctx.beginPath();
     for (let j = 0; j < idx.length; j++) {
       const i = idx[j] * 3;
@@ -1536,6 +1540,7 @@ function tourStops() {
 }
 const onScreenAt = (x, y) => x > 0 && x < W && y > 0 && y < H;
 function toggleTour() {
+  if (settings.sleepLock) return;
   if (tour) { tour = null; selected = null; return; }
   const stops = tourStops();
   tour = stops.length ? { stops, index: -1, next: 0 } : null;
@@ -1625,7 +1630,9 @@ function drawSetup() {
 }
 
 // ───────────────────────── render loop ─────────────────────────
-let last = 0, lastReadout = -10, lineAlpha = 0, nameAlpha = 0, slowFrames = 0, qualityNoteUntil = 0;
+let last = 0, lastReadout = -10, lineAlpha = 0, nameAlpha = 0, qualityNoteUntil = 0;
+let lastDrawMs = 0, slowSeconds = 0;
+const renderStats = { fps: 0, frameMs: 0, frames: 0 };
 
 function resize() {
   const dpr = Math.min(window.devicePixelRatio || 1, [1, 1.5, 2][settings.quality]);
@@ -1640,15 +1647,31 @@ function resize() {
 function frame(ms) {
   // nothing can be drawn into a window with no size (a hidden or still-opening tab); wait for one
   if (W < 2 || H < 2) { requestAnimationFrame(frame); return; }
+  const budget = 1000 / (settings.sleepLock && sleepFade === 0 && env.dawn === null ? 1 : settings.fps);
+  if (lastDrawMs && ms - lastDrawMs < budget - 0.7) { requestAnimationFrame(frame); return; }
+  lastDrawMs = ms - (ms - lastDrawMs) % budget;
   // dt drives motion and is capped so nothing jumps after a pause; fades use the real elapsed time
   const now = ms / 1000, elapsed = Math.min(5, now - last), dt = Math.min(0.1, elapsed);
   last = now;
+  if (elapsed > 0 && elapsed < 1.5 && document.visibilityState === 'visible') {
+    renderStats.frameMs += (elapsed * 1000 - renderStats.frameMs) * (renderStats.frames ? 0.08 : 1);
+    renderStats.fps = Math.round(1000 / renderStats.frameMs); renderStats.frames++;
+  }
   timeOffset += dt * 1000 * (SPEEDS[speedIdx] - 1);
   simTime = Date.now() + timeOffset;
   const d = Astro.days(simTime);
   updateView(d);
   updateSunMoon(d);
   updateEnvironment();
+  if (settings.sleepLock && env.dawn !== null) { settings.sleepLock = false; applySettings(); saveJSON(STORE_KEY, settings); }
+  const fullyAsleep = settings.sleepLock && sleepFade === 0 && env.dawn === null;
+  SkyAudio.setSleeping(fullyAsleep);
+  if (fullyAsleep) {
+    displayBrightness = 0;
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    if (now - lastReadout >= 1) { lastReadout = now; updateReadout(now); }
+    requestAnimationFrame(frame); return;
+  }
   Astro.updatePlanets(d);
   updateSatellites(elapsed);
   updateAurora(elapsed);
@@ -1658,18 +1681,18 @@ function frame(ms) {
 
   // If frames keep arriving slowly, step the quality down rather than stutter all night.
   // Long gaps are a hidden or paused tab, not a slow machine, so they are ignored.
-  if (elapsed < 0.25) {
-    slowFrames = elapsed > 0.045 ? slowFrames + 1 : Math.max(0, slowFrames - 2);
-    if (slowFrames > 240 && settings.quality > 0) {
-      slowFrames = 0; qualityNoteUntil = now + 90;
+  if (elapsed < 1.5 && document.visibilityState === 'visible') {
+    slowSeconds = elapsed * 1000 > budget * 1.45 ? slowSeconds + elapsed : Math.max(0, slowSeconds - elapsed * 2);
+    if (slowSeconds > 5 && settings.quality > 0) {
+      slowSeconds = 0; qualityNoteUntil = now + 90;
       change('quality', settings.quality - 1);
     }
   }
 
   // Sky overlays depend only on their explicit toggles.
   const ease = Math.min(1, elapsed * 2.5);
-  lineAlpha += ((settings.lines ? 1 : 0) - lineAlpha) * ease;
-  nameAlpha += ((settings.names ? 1 : 0) - nameAlpha) * ease;
+  lineAlpha += ((!settings.sleepLock && settings.lines ? 1 : 0) - lineAlpha) * ease;
+  nameAlpha += ((!settings.sleepLock && settings.names ? 1 : 0) - nameAlpha) * ease;
 
   if (now > radiant.until) pickRadiant(now);
   if (now >= nextMeteor) {
@@ -1719,7 +1742,8 @@ function frame(ms) {
   // The sleep timer fades the picture out with the music; the sunrise alarm brings it back early
   // in its dawn so there is something to wake to.
   const picture = env.dawn === null ? sleepFade : Math.max(sleepFade, Math.min(1, env.dawn * 4));
-  const shown = settings.brightness / 100 * picture;
+  displayBrightness += (settings.brightness - displayBrightness) * Math.min(1, dt * 2.5);
+  const shown = displayBrightness / 100 * picture;
   if (shown < 1) {
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1 - shown;
@@ -1787,7 +1811,7 @@ const FORMAT = {
   motion: v => v === 0 ? 'natural' : v < 40 ? 'gentle' : v < 80 ? 'alive' : 'vivid',
   quality: v => ['low', 'medium', 'high'][v], nature: v => v ? v + '%' : 'off',
 };
-const TOGGLES = ['lines', 'names', 'daylight', 'online', 'mirror', 'sounds', 'audio', 'autoMenu', 'realMeteors', 'issAlert', 'weather'];
+const TOGGLES = ['lines', 'names', 'daylight', 'online', 'mirror', 'sounds', 'audio', 'autoMenu', 'realMeteors', 'issAlert', 'weather', 'sleepLock'];
 const CITIES = [
   ['Canberra', -35.28, 149.13], ['Sydney', -33.87, 151.21], ['Melbourne', -37.81, 144.96], ['Perth', -31.95, 115.86],
   ['Auckland', -36.85, 174.76], ['Tokyo', 35.68, 139.69], ['Singapore', 1.35, 103.82], ['Cape Town', -33.92, 18.42],
@@ -1797,6 +1821,7 @@ const CITIES = [
 const TIME_FORMAT = { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' };
 let started = false, idleTimer = 0, sleepAt = 0, sleepFade = 1, alertedPass = 0;
 let menuTimer = 0, menuDragging = false, keyboardMenu = false;
+let displayBrightness = settings.brightness;
 const menuPointer = { x: null, y: null };
 
 function applySettings() {
@@ -1804,6 +1829,8 @@ function applySettings() {
   SkyAudio.setMuted(!settings.audio);
   SkyAudio.setVolume(settings.volume / 100 * sleepFade);
   SkyAudio.setNature(settings.nature / 100);
+  SkyAudio.setQuiet(settings.sleepLock);
+  SkyAudio.setMix({ drone: settings.droneMix / 100, pads: settings.padsMix / 100, air: settings.airMix / 100 });
   for (const key in FORMAT) { $(key).value = settings[key]; $('o-' + key).textContent = FORMAT[key](settings[key]); }
   for (const key of TOGGLES) $(key).checked = settings[key];
   $('culture').value = settings.culture; $('alarm').value = settings.alarm; $('visions').value = settings.visions;
@@ -1812,16 +1839,27 @@ function applySettings() {
   $('city').value = city ? city[0] : '';
   $('speed').value = speedIdx; $('o-speed').textContent = SPEED_LABELS[speedIdx];
   $('style').value = settings.style;
+  for (const id of ['fps', 'droneMix', 'padsMix', 'airMix']) if ($(id)) $(id).value = settings[id];
+  for (const input of document.querySelectorAll('[data-vision],#tour,#shower,#turn,#setup-open,#lines,#names')) input.disabled = settings.sleepLock;
   updateMenuVisibility();
+  window.dispatchEvent(new CustomEvent('khonshu-settings', { detail: { ...settings } }));
 }
 function change(key, value) {
   if (!(key in DEFAULTS) || typeof value !== typeof DEFAULTS[key] || Number.isNaN(value)) return;
   if (key === 'culture' && value !== 'western' && value !== 'aboriginal') return;
   if (key === 'visions' && !['off', 'rare', 'often'].includes(value)) return;
   if (key === 'alarm' && !/^(([01]\d|2[0-3]):[0-5]\d)?$/.test(value)) return;
+  if (key === 'soundSource' && !/^(khonshu|deep-space|weightless|quiet-hush|local:[a-zA-Z0-9-]+)$/.test(value)) return;
+  if (key === 'fps' && value !== 30 && value !== 60) return;
+  if (['droneMix', 'padsMix', 'airMix'].includes(key)) value = clamp(value, 0, 100);
   const input = $(key);
   if (input && input.type === 'range') value = clamp(value, +input.min, +input.max);
   settings[key] = value;
+  if (key === 'sleepLock') {
+    if (value) quietenSky(); else if (sleepAt && sleepFade < 1) setSleepTimer(0);
+    scheduleMeteor(nowSec());
+  }
+  if (key === 'fps') { lastDrawMs = 0; slowSeconds = 0; }
   if (Object.values(PRESETS).some(preset => key in preset)) settings.style = 'custom';
   if (key === 'meteors' || key === 'realMeteors') scheduleMeteor(nowSec());
   if (key === 'clouds' || key === 'motion') bakeClouds();
@@ -1835,8 +1873,9 @@ function change(key, value) {
 function applyPreset(style) {
   if (!Object.hasOwn(PRESETS, style)) return;
   Object.assign(settings, PRESETS[style], { style });
+  if (settings.sleepLock) quietenSky(); else if (sleepAt && sleepFade < 1) setSleepTimer(0);
   bakeClouds(); scheduleMeteor(nowSec());
-  if (style === 'real') goLive();
+  if (style === 'real' || style === 'sleep') goLive();
   applySettings(); saveJSON(STORE_KEY, settings);
   remote.dirty = true;
 }
@@ -1867,7 +1906,7 @@ const clock = ms => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minut
 
 function updateReadout(now) {
   updateShower();
-  if (realSats.length && now - lastPassCheck > 600) {
+  if (!settings.sleepLock && realSats.length && now - lastPassCheck > 600) {
     lastPassCheck = now;
     // orbits drift, so a pass is only predicted within three weeks of the orbit data
     const el = realSats[0].el;
@@ -1907,7 +1946,7 @@ function updateReadout(now) {
   const overhead = realSats.filter(s => s.fade > 0.5).map(s => s.name);
   const minutesToPass = issPass && !simulated ? (issPass - Date.now()) / 60000 : -1;
   if (overhead.length) parts.push(overhead.join(' and ') + ' passing over now');
-  else if (settings.issAlert && minutesToPass > 0 && minutesToPass <= 5) {
+  else if (!settings.sleepLock && settings.issAlert && minutesToPass > 0 && minutesToPass <= 5) {
     parts.push(`ISS appears in ${Math.ceil(minutesToPass)} min`);
     // one chime per pass; the pass time shifts by a few seconds each time it is recalculated
     if (Math.abs(issPass - alertedPass) > 600000) { alertedPass = issPass; SkyAudio.chime(); }
@@ -1922,12 +1961,19 @@ function updateReadout(now) {
   if (env.dawn !== null) fade = Math.max(fade, env.dawn);
   if (fade !== sleepFade) { sleepFade = fade; SkyAudio.setVolume(settings.volume / 100 * fade); }
   if (env.dawn !== null) parts.push('Wake-up dawn');
-  else if (sleepAt) parts.push(fade > 0 ? 'Sleep timer: fades out by ' + clock(sleepAt) : 'Asleep: move the mouse to bring the sky back');
+  else if (sleepAt) parts.push(fade > 0 ? 'Sleep timer: fades out by ' + clock(sleepAt) : settings.sleepLock ? 'Asleep: press W to wake' : 'Asleep: move the mouse to bring the sky back');
+  if (settings.sleepLock) parts.push('Sleep lock on');
   if (settings.alarm && env.dawn === null) parts.push('Wake-up dawn set for ' + settings.alarm);
   for (const status of fx.status) { const text = status(); if (text) parts.push(text); }
+  keepAwake();
+  // khonshu_server.py also holds the computer awake on Windows; without either, say so
+  if (started && !navigator.wakeLock && !remote.keepsAwake) {
+    parts.push('This browser cannot stop the computer sleeping: use Start Khonshu.bat, or turn sleep off in Windows');
+  }
   if (remote.url) parts.push('Phone remote: ' + remote.url);
   remote.status = parts.join('  ·  ');
   $('readout').textContent = remote.status;
+  window.dispatchEvent(new CustomEvent('khonshu-status', { detail: { text: remote.status, sleepAt, sleepFade, ...renderStats } }));
   if (remote.on) pushRemoteState();
 }
 
@@ -1945,6 +1991,7 @@ $('go').addEventListener('click', () => goToTime(new Date($('when').value).getTi
 $('culture').addEventListener('change', e => change('culture', e.target.value));
 $('alarm').addEventListener('change', e => change('alarm', e.target.value));
 $('visions').addEventListener('change', e => change('visions', e.target.value));
+$('fps').addEventListener('change', e => change('fps', +e.target.value));
 
 // each step of the ceiling setup: what to ask, and what each answer does
 const SETUP_STEPS = [null, {
@@ -1990,6 +2037,7 @@ function toggleFullscreen() {
   else document.documentElement.requestFullscreen?.().catch(() => {});
 }
 function startShower() {
+  if (settings.sleepLock) return;
   const now = nowSec();
   showerUntil = now + 25;
   scheduleMeteor(now);
@@ -2001,8 +2049,36 @@ function setSleepTimer(minutes) {
   $('sleep').value = String(minutes > 0 ? minutes : 0);
   applySettings();
 }
+// While the sky is playing, ask the browser to keep the screen on, which also stops the computer
+// going to sleep. The browser drops the request whenever the page is hidden or it feels like it,
+// so this is called again every second and simply returns if the request is still held.
+let wakeLock = null, wakeAsked = false;
 async function keepAwake() {
-  try { await navigator.wakeLock?.request('screen'); } catch {}
+  if (!started || wakeLock || wakeAsked || !navigator.wakeLock || document.visibilityState !== 'visible') return;
+  wakeAsked = true;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch {}
+  wakeAsked = false;
+}
+function quietenSky() {
+  tour = null; selected = null; showerUntil = 0; meteors.length = 0;
+  keyboardMenu = false; menuDragging = false; menuPointer.x = menuPointer.y = null;
+  window.KhonshuSky?.voyage?.finish(); window.KhonshuSky?.visions?.cancelAll();
+  fx.lens.on = false; fx.nova = null; showSetup(0);
+}
+function startNight() {
+  if (!started) begin();
+  const minutes = +$('sleep').value || 60;
+  const volume = Math.min(settings.volume, 30), brightness = Math.min(settings.brightness, 60);
+  applyPreset('sleep'); setSleepTimer(minutes);
+  change('volume', volume); change('brightness', brightness);
+  keyboardMenu = false; leaveMenu(); updateMenuVisibility(true);
+}
+function wakeNight() {
+  change('sleepLock', false); setSleepTimer(0);
+  keyboardMenu = true; showMenu(true);
 }
 function begin() {
   if (started) return;
@@ -2029,7 +2105,7 @@ function showMenu(visible) {
 }
 function updateMenuVisibility(immediate = false) {
   if (!started) return;
-  const visible = !settings.autoMenu || pointerOverMenu() || menuDragging || keyboardMenu;
+  const visible = (!settings.sleepLock && (!settings.autoMenu || pointerOverMenu())) || menuDragging || keyboardMenu;
   if (visible) {
     clearTimeout(menuTimer); menuTimer = 0;
     showMenu(true);
@@ -2046,7 +2122,9 @@ function wake(event) {
     menuPointer.x = event.clientX; menuPointer.y = event.clientY;
     if (!pointerOverMenu()) keyboardMenu = false;
     // touching the mouse once the sleep timer has started fading cancels it
-    if (sleepAt && sleepFade < 1 && env.dawn === null) setSleepTimer(0);
+    if (!settings.sleepLock && sleepAt && sleepFade < 1 && env.dawn === null) setSleepTimer(0);
+    if (settings.sleepLock && event.type === 'pointermove') return;
+    if (settings.sleepLock && event.type === 'pointerdown' && pointerOverMenu()) keyboardMenu = true;
   }
   document.body.classList.remove('idle');
   clearTimeout(idleTimer);
@@ -2057,6 +2135,7 @@ const ACTIONS = {
   meteor: () => spawnMeteor(nowSec(), { fireball: false }), fireball: () => spawnMeteor(nowSec(), { fireball: true }),
   shower: startShower, aurora: toggleAurora, live: goLive, turn: watchSkyTurn, tour: toggleTour,
   mute: () => change('audio', !settings.audio), fullscreen: toggleFullscreen,
+  startNight, wake: wakeNight,
 };
 
 $('intro').addEventListener('click', begin);
@@ -2068,7 +2147,7 @@ $('turn').addEventListener('click', watchSkyTurn);
 $('style').addEventListener('change', e => applyPreset(e.target.value));
 $('locate').addEventListener('click', locate);
 canvas.addEventListener('click', e => {
-  if (!started) return;
+  if (!started || settings.sleepLock) return;
   const box = canvas.getBoundingClientRect(), x = (e.clientX - box.left) / box.width * W;
   identify(settings.mirror ? W - x : x, (e.clientY - box.top) / box.height * H);
 });
@@ -2094,9 +2173,11 @@ window.addEventListener('keydown', e => {
   if (e.ctrlKey || e.altKey || e.metaKey || /^(number|datetime-local|time|select-one)$/.test(e.target.type)) return;
   const key = e.key.toLowerCase();
   if (!started) { if (key === 'enter' || key === ' ') { e.preventDefault(); begin(); } return; }
+  if (key === 'w') { e.preventDefault(); wakeNight(); return; }
+  if (settings.sleepLock && !['h', 'f', 'm'].includes(key)) return;
   if (key === 'h') {
     e.preventDefault(); keyboardMenu = true;
-    showMenu(true); $('autoMenu').focus();
+    showMenu(true); (settings.sleepLock ? $('wake-night') || $('sleepLock') : $('autoMenu')).focus();
   }
   else if (key === 'f') toggleFullscreen();
   else if (key === 'm') ACTIONS.mute();
@@ -2134,7 +2215,8 @@ function pushRemoteState() {
   const now = Date.now();
   if (!remote.dirty && now - remote.lastPush < 5000) return;
   remote.dirty = false; remote.lastPush = now;
-  fetch('api/state', { method: 'POST', body: JSON.stringify({ settings, speed: speedIdx, status: remote.status, started }) }).catch(() => {});
+  fetch('api/state', { method: 'POST', body: JSON.stringify({ settings, speed: speedIdx, status: remote.status, started, awake: started,
+    tracks: window.KHONSHU_TRACKS || [], playback: SkyAudio.playback, bedtime: { sleepAt, sleepFade }, build: window.KHONSHU_BUILD }) }).catch(() => {});
 }
 async function pollRemote() {
   try {
@@ -2148,7 +2230,7 @@ async function connectRemote() {
   if (!location.protocol.startsWith('http')) return;
   try {
     const info = await (await fetch('api/state')).json();
-    remote.on = true; remote.url = info.remote || '';
+    remote.on = true; remote.url = info.remote || ''; remote.keepsAwake = !!info.keepsAwake;
     pollRemote();
   } catch {}
 }
@@ -2162,6 +2244,8 @@ window.KhonshuSky = {
   blobs, sprites, catV, catMag, starNames, visible, airmass, extinction, drawMoonAt, describeMoon, wrapText, setSpacing,
   goToTime, goLive, setSpeed, select(item, seconds) { tour = null; selected = item && Object.assign(item, { until: nowSec() + seconds }); },
   refreshStatus() { lastReadout = -10; },
+  setSleepTimer, get bedtime() { return { sleepAt, sleepFade, locked: settings.sleepLock }; },
+  get performance() { return { ...renderStats, target: settings.fps }; },
 };
 
 resize();

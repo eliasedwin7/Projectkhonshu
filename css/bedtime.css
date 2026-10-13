@@ -1,0 +1,40 @@
+/* These rules follow the original page styles, with higher specificity. */
+body #panel { display: block; width: min(760px, calc(100vw - 32px)); padding: 20px 24px; }
+body.intro #panel, body.setting-up #panel { display: none; }
+.bedtime-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px; }
+.bedtime-header strong { display: block; font-size: 14px; font-weight: 500; letter-spacing: .32em; }
+#night-status { display: block; font-size: 12px; opacity: .6; margin-top: 5px; }
+.bedtime-actions { display: flex; gap: 8px; }
+#panel #start-night { padding: 10px 22px; background: rgba(140,165,255,.2); }
+#panel button[hidden] { display: none; }
+#panel button:disabled, #panel input:disabled { opacity: .4; cursor: default; }
+.bedtime-basics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.bedtime-toggles { display: flex; flex-wrap: wrap; gap: 12px 20px; margin: 18px 0; }
+#panel .bedtime-toggles label { flex-direction: row; align-items: center; gap: 6px; }
+#panel details { border-top: 1px solid rgba(160,180,255,.12); padding-top: 12px; margin-top: 12px; }
+#panel summary { cursor: pointer; padding: 2px 0; letter-spacing: .035em; }
+.advanced-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14px 20px; margin-top: 16px; }
+.advanced-grid .row, #performance-readout { grid-column: 1 / -1; }
+#performance-readout { margin: 0; opacity: .55; font-size: 12px; }
+#tonight-details #readout { margin-top: 12px; font-size: 12px; }
+.bedtime-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 14px; font-size: 11px; opacity: .5; }
+#panel .sound-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+#panel .sound-controls label { display: inline-block; padding: 7px 14px; background: rgba(140,165,255,.1); border: 1px solid rgba(170,190,255,.3); border-radius: 999px; cursor: pointer; }
+#panel .sound-controls input[type=file] { max-width: 100%; font: inherit; margin-top: 6px; }
+.sound-mixer { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; margin: 14px 0; }
+.sound-mixer output { margin-left: 8px; }
+.sound-error { color: #ffd3af; }
+.sound-controls button[hidden], .sound-controls label[hidden], .sound-mixer[hidden] { display: none !important; }
+#app-update { color: #dae4ff; padding: 4px 10px; border: 1px solid #56627e; border-radius: 6px; font: inherit; background: #1b2235; cursor: pointer; }
+@media (max-width: 600px) {
+  body #panel { padding: 18px; }
+  .bedtime-header { gap: 10px; }
+  #panel #start-night { padding: 8px 12px; }
+  .bedtime-basics { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
+  .bedtime-basics label:last-child { grid-column: 1 / -1; }
+  .advanced-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+  .sound-mixer { grid-template-columns: 1fr; gap: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #panel, body.menu-hidden #panel, #intro { transition: none; }
+}

@@ -2,3 +2,8 @@
 __pycache__/
 *.pyc
 desktop.ini
+node_modules/
+public/
+.wrangler/
+test-results/
+playwright-report/

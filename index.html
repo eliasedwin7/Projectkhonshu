@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Khonshu — Night Sky</title>
+<meta name="theme-color" content="#080b16">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/bedtime.css">
 <style>
   :root { color-scheme: dark; }
   html, body {
@@ -116,7 +121,7 @@
   <button id="begin">Begin</button>
   <small>F fullscreen &nbsp;·&nbsp; M mute &nbsp;·&nbsp; C toggle constellations &nbsp;·&nbsp; N toggle names &nbsp;·&nbsp; A aurora &nbsp;·&nbsp; D daylight &nbsp;·&nbsp; L live time<br>
     Space meteor &nbsp;·&nbsp; B fireball &nbsp;·&nbsp; S shower &nbsp;·&nbsp; T tour of tonight's sky &nbsp;·&nbsp; V voyage &nbsp;·&nbsp; click anything in the sky to identify it<br>
-    Move the mouse over the menu area at the bottom for controls &nbsp;·&nbsp; H open controls &nbsp;·&nbsp; Esc hide controls</small>
+    Move the mouse over the menu area at the bottom for controls &nbsp;·&nbsp; H open controls &nbsp;·&nbsp; Esc hide controls &nbsp;·&nbsp; W wake from Sleep lock</small>
 </div>
 
 <div id="panel" inert>
@@ -138,6 +143,7 @@
   <label><span>Latitude / longitude</span><span><input type="number" id="lat" min="-90" max="90" step="0.01"><input type="number" id="lon" min="-180" max="180" step="0.01"></span></label>
   <label title="Uses this computer's clock, whatever place is chosen"><span>Jump to a date</span><span><input type="datetime-local" id="when" min="1800-01-01T00:00" max="2099-12-31T23:59"><button id="go">Go</button></span></label>
   <label title="Lower this if the picture stutters. It also lowers itself if frames keep arriving slowly."><span>Quality <output id="o-quality"></output></span><input type="range" id="quality" min="0" max="2" step="1"></label>
+  <label><span>Animation speed</span><select id="fps"><option value="30">Quiet · 30 fps</option><option value="60">Smooth · 60 fps</option></select></label>
   <label title="Crickets, frogs, leaves and a distant boobook owl, mixed in with the music"><span>Night sounds <output id="o-nature"></output></span><input type="range" id="nature" min="0" max="100" step="5"></label>
   <label title="Which figures and names to show. The Aboriginal sky is a small selection from published accounts."><span>Sky culture</span><select id="culture">
     <option value="western">Western</option><option value="aboriginal">Aboriginal</option>
@@ -149,6 +155,7 @@
   </select></label>
 
   <div class="row">
+    <label title="Silence alerts and effects; mouse movement cannot wake the sky"><input type="checkbox" id="sleepLock"> Sleep lock</label>
     <label title="Show the menu when the pointer is over its area; hide it when the pointer leaves"><input type="checkbox" id="autoMenu"> Auto menu</label>
     <label title="Turn all music and meteor audio on or off; shortcut M"><input type="checkbox" id="audio"> Sound on</label>
     <label title="Show constellation lines; shortcut C"><input type="checkbox" id="lines"> Show constellations</label>
@@ -203,9 +210,12 @@
 <script src="js/astro.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/skylore.js"></script>
-<script src="js/sound-collection.js"></script>
+<script src="js/version.js"></script>
 <script src="js/sky.js"></script>
 <script src="js/visions.js"></script>
 <script src="js/voyage.js"></script>
+<script src="js/bedtime.js"></script>
+<script src="js/sound-collection.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>

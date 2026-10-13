@@ -6,6 +6,16 @@ const SkyAudio = (() => {
 'use strict';
 
 let ac = null, master, verb, padBus, natureBus, noiseBuf, muted = false, volume = 0.6, nature = 0, current = 0;
+let ambientBus, droneBus, padsBus, airBus, localNode, localURL = '', source = 'generated', quiet = false, sleeping = false;
+const mix = { drone: 0.7, pads: 0.7, air: 0.35 };
+const localAudio = new Audio(); localAudio.loop = true; localAudio.preload = 'metadata';
+function reportPlayback(message = '') {
+  window.dispatchEvent(new CustomEvent('khonshu-playback', { detail: { message,
+    source, playing: source === 'local' ? !localAudio.paused : !!ac && ac.state === 'running' && !muted } }));
+}
+localAudio.addEventListener('play', () => reportPlayback());
+localAudio.addEventListener('pause', () => reportPlayback());
+localAudio.addEventListener('error', () => reportPlayback('This browser cannot play that file. Choose another audio format.'));
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
@@ -17,6 +27,11 @@ const CHORDS = [
 const NEXT = [[1, 2, 3], [2, 5, 0], [0, 3, 4], [0, 2, 4], [0, 1], [2, 1]];
 
 const gain = v => { const g = ac.createGain(); g.gain.value = v; return g; };
+function ramp(bus, value, seconds = 0.8) {
+  const param = bus.gain, t = ac.currentTime, currentValue = param.value;
+  param.cancelScheduledValues(t); param.setValueAtTime(currentValue, t);
+  param.linearRampToValueAtTime(value, t + seconds);
+}
 const filter = (type, freq, q) => {
   const f = ac.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q; return f;
 };
@@ -39,19 +54,24 @@ function impulse(seconds) {
 }
 
 function start() {
-  if (ac) { ac.resume(); return; }
+  if (ac) { if (!sleeping) ac.resume(); return; }
   ac = new (window.AudioContext || window.webkitAudioContext)();
   master = gain(0);
   const comp = ac.createDynamicsCompressor();
   comp.threshold.value = -20; comp.ratio.value = 2.5; comp.attack.value = 0.2; comp.release.value = 1;
   master.connect(comp).connect(ac.destination);
+  ambientBus = gain(source === 'generated' ? 1 : 0); ambientBus.connect(master);
+  droneBus = gain(mix.drone); padsBus = gain(mix.pads); airBus = gain(mix.air);
 
   verb = ac.createConvolver(); verb.buffer = impulse(9);
-  verb.connect(gain(0.9)).connect(master);
+  verb.connect(gain(0.9)).connect(ambientBus);
 
   padBus = filter('lowpass', 620, 0.2);
-  padBus.connect(gain(0.5)).connect(master);
+  padBus.connect(gain(0.5)).connect(ambientBus);
   padBus.connect(gain(0.9)).connect(verb);
+  droneBus.connect(padBus); padsBus.connect(padBus);
+  airBus.connect(ambientBus); airBus.connect(verb);
+  localNode = ac.createMediaElementSource(localAudio); localNode.connect(master);
   lfo(0.011, 180, padBus.frequency);
 
   noiseBuf = ac.createBuffer(1, ac.sampleRate * 5, ac.sampleRate);
@@ -63,7 +83,7 @@ function start() {
     const src = ac.createBufferSource(), g = gain(level);
     src.buffer = noiseBuf; src.loop = true;
     src.connect(filter(type, freq, q)).connect(g);
-    g.connect(master); g.connect(verb);
+    g.connect(airBus);
     lfo(rate, level * 0.55, g.gain);
     src.start(0, Math.random() * 4);
   });
@@ -72,7 +92,7 @@ function start() {
   [[38, 0.045, 0.023], [45, 0.02, 0.037], [50, 0.022, 0.051]].forEach(([m, g, rate]) => {
     const o = ac.createOscillator(), og = gain(g);
     o.frequency.value = mtof(m);
-    o.connect(og).connect(padBus);
+    o.connect(og).connect(droneBus);
     lfo(rate, g * 0.4, og.gain);
     o.start();
   });
@@ -81,6 +101,8 @@ function start() {
   master.gain.setTargetAtTime(targetGain(), ac.currentTime, 4);
   chord(0);
   setTimeout(shimmer, 30000);
+  if (source === 'local' && localURL && !muted) playLocal();
+  reportPlayback();
 }
 
 // ───────────────────────── night sounds ─────────────────────────
@@ -127,6 +149,7 @@ function startNature() {
 
 // a few creaking croaks: a slow sawtooth ringing a narrow filter
 function frog() {
+  if (sleeping) { setTimeout(frog, 30000); return; }
   const t0 = ac.currentTime + 0.05, count = 2 + Math.floor(Math.random() * 4), gap = 0.32 + Math.random() * 0.1;
   const o = ac.createOscillator(), g = gain(0), pan = ac.createStereoPanner();
   o.type = 'sawtooth'; o.frequency.value = 24 + Math.random() * 8;
@@ -146,6 +169,7 @@ function frog() {
 
 // the two-note "boo-book" of the southern boobook, repeated a few times from somewhere far off
 function owl() {
+  if (sleeping) { setTimeout(owl, 60000); return; }
   const t0 = ac.currentTime + 0.1, calls = 3 + Math.floor(Math.random() * 4), pan = ac.createStereoPanner();
   pan.pan.value = Math.random() * 1.6 - 0.8;
   pan.connect(natureBus);
@@ -167,7 +191,7 @@ function owl() {
 
 // two soft notes, used to announce a satellite pass
 function chime() {
-  if (!ac || ac.state !== 'running') return;
+  if (!ac || ac.state !== 'running' || quiet) return;
   [[76, 0], [81, 0.7]].forEach(([m, delay]) => {
     const t = ac.currentTime + 0.05 + delay, o = ac.createOscillator(), g = gain(0);
     o.frequency.value = mtof(m);
@@ -193,7 +217,7 @@ function tone(freq, partials, peak, t, attack, hold, release, pan) {
   g.gain.setValueAtTime(0, t);
   g.gain.linearRampToValueAtTime(peak, t + attack);
   g.gain.setTargetAtTime(0, t + hold, release);
-  g.connect(panner).connect(padBus);
+  g.connect(panner).connect(padsBus);
   const end = t + hold + release * 6;
   partials.concat([[1, 0.6, 0.25 + Math.random() * 0.4]]).forEach(([mult, level, offset = 0], k) => {
     const o = ac.createOscillator();
@@ -205,6 +229,7 @@ function tone(freq, partials, peak, t, attack, hold, release, pan) {
 }
 
 function chord(idx) {
+  if (sleeping) { setTimeout(() => chord(current), 15000); return; }
   current = idx;
   const t = ac.currentTime + 0.1, hold = 45 + Math.random() * 30, attack = 14 + Math.random() * 6;
   CHORDS[idx].forEach((m, i) => {
@@ -218,13 +243,14 @@ function chord(idx) {
 
 // now and then a faint high voice drifts in over the chord and fades away again
 function shimmer() {
+  if (sleeping) { setTimeout(shimmer, 30000); return; }
   tone(mtof(pick(CHORDS[current].slice(2)) + 24), [[1, 1]], 0.012, ac.currentTime + 0.1, 9, 12, 6, Math.random() * 1.6 - 0.8);
   setTimeout(shimmer, (40 + Math.random() * 50) * 1000);
 }
 
 // a soft breath of air for a meteor; panPos −1 (left) to 1 (right), mag 0–1
 function meteor(panPos, mag, fire) {
-  if (!ac || ac.state !== 'running') return;
+  if (!ac || ac.state !== 'running' || quiet) return;
   const t = ac.currentTime + 0.02, dur = fire ? 3.5 : 1.6;
   const src = ac.createBufferSource(), lp = filter('lowpass', 1000, 0.5), g = gain(0), pan = ac.createStereoPanner();
   src.buffer = noiseBuf; src.loop = true;
@@ -253,11 +279,66 @@ function setVolume(v) {
 function setMuted(value) {
   if (muted === value) return;
   muted = value; setVolume(volume);
+  if (muted) localAudio.pause();
+  else if (source === 'local' && localURL && ac) playLocal();
+  reportPlayback();
+}
+function setMix(levels) {
+  for (const key of ['drone', 'pads', 'air']) {
+    if (Number.isFinite(levels[key])) mix[key] = clamp(levels[key], 0, 1);
+  }
+  if (!ac) return;
+  for (const [key, bus] of [['drone', droneBus], ['pads', padsBus], ['air', airBus]]) {
+    ramp(bus, mix[key]);
+  }
+}
+function setSource(value) {
+  const next = value === 'local' ? 'local' : 'generated';
+  if (source === next) return;
+  source = next;
+  if (ambientBus) ramp(ambientBus, source === 'generated' ? 1 : 0);
+  if (source !== 'local') localAudio.pause();
+  else if (localURL && ac && !muted) playLocal();
+  reportPlayback();
+}
+function setFile(blob) {
+  localAudio.pause();
+  if (localURL) URL.revokeObjectURL(localURL);
+  localURL = blob ? URL.createObjectURL(blob) : '';
+  if (localURL) localAudio.src = localURL;
+  else { localAudio.removeAttribute('src'); localAudio.load(); }
+  if (source === 'local' && localURL && ac && !muted) playLocal();
+}
+async function playLocal() {
+  if (!localURL || !ac || muted || source !== 'local' || sleeping) return;
+  try { await ac.resume(); await localAudio.play(); }
+  catch { reportPlayback('Press Play to start this track.'); }
+}
+function togglePlayback() {
+  if (!ac) start();
+  if (source === 'local') {
+    if (localAudio.paused) { setMuted(false); playLocal(); } else localAudio.pause();
+  }
+}
+function setQuiet(value) { quiet = !!value; }
+function setSleeping(value) {
+  if (sleeping === value) return;
+  sleeping = value;
+  if (!ac) return;
+  if (sleeping) {
+    localAudio.pause();
+    master.gain.cancelScheduledValues(ac.currentTime); master.gain.setValueAtTime(0, ac.currentTime);
+    ac.suspend().catch(() => {});
+  } else {
+    setVolume(volume);
+    ac.resume().then(() => { if (!muted && source === 'local') playLocal(); }).catch(() => {});
+  }
+  reportPlayback();
 }
 
 // a low chord that rises and falls over half a minute, to mark something appearing in the sky
 function swell() {
-  if (!ac || ac.state !== 'running') return;
+  if (!ac || ac.state !== 'running' || quiet) return;
   const t = ac.currentTime + 0.1;
   tone(mtof(26), [[1, 1], [2, 0.6], [3, 0.25]], 0.07, t, 7, 10, 5, -0.3);
   tone(mtof(45), [[1, 1], [2, 0.3]], 0.035, t, 9, 9, 5, 0.3);
@@ -267,6 +348,7 @@ function swell() {
 let travel = null;
 function setTravel(level) {
   if (!ac) return;
+  if (!travel && !level) return;
   if (!travel) {
     travel = gain(0);
     travel.connect(padBus);
@@ -277,10 +359,11 @@ function setTravel(level) {
       o.connect(gain(m < 30 ? 0.5 : 0.3)).connect(travel);
       o.start();
     });
-    lfo(0.017, 0.02, travel.gain);
   }
-  travel.gain.setTargetAtTime(level * 0.1, ac.currentTime, 5);
+  ramp(travel, level * 0.1, level ? 5 : 1);
 }
 
-return { start, meteor, chime, swell, setTravel, setVolume, setNature, setMuted };
+return { start, meteor, chime, swell, setTravel, setVolume, setNature, setMuted,
+  setMix, setSource, setFile, togglePlayback, setQuiet, setSleeping,
+  get playback() { return { source, playing: source === 'local' && !localAudio.paused, time: localAudio.currentTime }; } };
 })();

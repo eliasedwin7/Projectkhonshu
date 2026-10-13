@@ -172,8 +172,12 @@ function stopVision() {
   active = null;
   sky.refreshStatus();
 }
+function cancelAll() {
+  stopVision(); cometWanted = false; replay = null; eyepiece = null; clearHole();
+}
 // `freeze`, if given, holds the vision at that point (0–1) for inspection
 function startVision(name, freeze) {
+  if (settings.sleepLock) return false;
   const vision = VISIONS[name];
   if (!vision || fx.lift > 0) return false;
   stopVision();
@@ -217,6 +221,7 @@ fx.foreground.push(() => {
 // time when visions are on, or whenever it is called up by hand.
 const cometSprite = sky.buildBlob([190, 235, 225]), ionSprite = sky.buildBlob([120, 170, 255]);
 function cometShowing(d) {
+  if (settings.sleepLock) return false;
   if (cometWanted) return true;
   if (settings.visions === 'off') return false;
   return ((Math.floor(d) % (settings.visions === 'often' ? 45 : 110)) + 110) % 110 < 20;
@@ -439,7 +444,8 @@ fx.overlay.push(now => {
 // ───────────────────────── controls and status ─────────────────────────
 Object.assign(sky.actions, {
   blackhole: () => toggleVision('blackhole'), supernova: () => toggleVision('supernova'),
-  comet: () => { cometWanted = !cometWanted; sky.refreshStatus(); }, eclipse: replayEclipse,
+  comet: () => { if (settings.sleepLock) return; cometWanted = !cometWanted; sky.refreshStatus(); },
+  eclipse: () => { if (!settings.sleepLock) replayEclipse(); },
 });
 Object.assign(fx.keys, { k: sky.actions.blackhole, u: sky.actions.supernova, o: sky.actions.comet, e: sky.actions.eclipse });
 for (const button of document.querySelectorAll('#panel button[data-vision]')) {
@@ -462,5 +468,5 @@ if (VISIONS[query.get('vision')]) {
 }
 if (query.get('vision') === 'comet') cometWanted = true;
 
-sky.visions = { start: startVision, stop: stopVision, setHole, clearHole, fromCamera, screenCircle, slerp, smooth };
+sky.visions = { start: startVision, stop: stopVision, cancelAll, setHole, clearHole, fromCamera, screenCircle, slerp, smooth };
 })();

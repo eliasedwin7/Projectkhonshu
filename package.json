@@ -1,0 +1,17 @@
+{
+  "name": "projectkhonshu",
+  "version": "2.0.0",
+  "private": true,
+  "description": "A quiet night sky and ambient player for a ceiling projector",
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/build.test.mjs && node tests/browser.cjs",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "playwright": "1.64.0",
+    "wrangler": "4.150.0"
+  }
+}

@@ -171,6 +171,7 @@ function finish() {
   sky.refreshStatus();
 }
 function begin(hold) {
+  if (sky.settings.sleepLock) return;
   if (trip || fx.lift > 0) return;
   sky.visions.stop();
   trip = { t0: sky.now(), place: null, since: 0, tunnel: 0, leg: 0, q: 0, hold };

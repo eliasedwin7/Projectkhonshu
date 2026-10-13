@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#05070f">
 <title>Khonshu remote</title>
+<link rel="stylesheet" href="css/bedtime.css">
 <style>
   :root { color-scheme: dark; }
   body {
@@ -48,6 +49,8 @@
     <option value="sleep">Sleep</option><option value="custom" disabled>Custom</option>
   </select></label>
   <div class="buttons">
+    <button data-action="startNight">Start night</button>
+    <button data-action="wake">Wake</button>
     <button data-action="meteor">Meteor</button>
     <button data-action="fireball">Fireball</button>
     <button data-action="shower">Meteor shower</button>
@@ -59,6 +62,7 @@
 <section>
   <h2>Picture and sound</h2>
   <div class="checks"><label><input type="checkbox" data-key="audio"> Sound on</label></div>
+  <div class="checks"><label><input type="checkbox" data-key="sleepLock"> Sleep lock</label></div>
   <label><span>Volume <output></output></span><input type="range" data-key="volume" min="0" max="100" step="1"></label>
   <label><span>Brightness <output></output></span><input type="range" data-key="brightness" min="30" max="100" step="1"></label>
   <label><span>Night sounds <output></output></span><input type="range" data-key="nature" min="0" max="100" step="5"></label>
@@ -123,7 +127,10 @@
   <label><span>Facing <output></output></span><input type="range" data-key="facing" min="0" max="359" step="1"></label>
 </section>
 
+<div class="bedtime-footer"><span data-app-version></span><span id="connection-status"></span></div>
+<script src="js/version.js"></script>
 <script src="js/sound-collection.js"></script>
+<script src="js/app.js"></script>
 <script>
 (() => {
 'use strict';
@@ -138,6 +145,7 @@ function send(command) {
   touched = Date.now();
   fetch('api/command', { method: 'POST', body: JSON.stringify(command) }).catch(() => {});
 }
+window.addEventListener('khonshu-command', e => send(e.detail));
 const show = input => { input.closest('label').querySelector('output').textContent = input.value; };
 
 for (const input of sliders) {
@@ -163,11 +171,12 @@ $('go').addEventListener('click', () => {
 async function refresh() {
   try {
     const state = await (await fetch('api/state')).json();
+    window.dispatchEvent(new CustomEvent('khonshu-remote-state', { detail: state }));
     $('status').textContent = state.status
       ? (state.started ? '' : 'Press Begin on the sky to start it.  ') + state.status.replace(/\s+·\s+Phone remote.*/, '')
       : 'Waiting for the sky: open it on the projector computer.';
     // buzz once when the space station is a few minutes away
-    const soon = /ISS appears in/.test(state.status || '');
+    const soon = !state.settings?.sleepLock && /ISS appears in/.test(state.status || '');
     if (soon && !issSoon && navigator.vibrate) navigator.vibrate([200, 100, 200]);
     issSoon = soon;
     if (state.settings && Date.now() - touched > 2500) {
