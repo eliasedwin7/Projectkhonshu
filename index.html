@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Khonshu — Night Sky</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body {
+    margin: 0; height: 100%; background: #000; overflow: hidden;
+    font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: #c9d2ea;
+  }
+  #sky { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  body.idle, body.idle * { cursor: none; }
+
+  #intro {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 20px; text-align: center;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,.2), rgba(0,0,0,.72));
+    transition: opacity 2.5s ease; cursor: pointer; user-select: none;
+  }
+  #intro.gone { opacity: 0; pointer-events: none; }
+  #intro h1 {
+    margin: 0; padding-left: .6em; font-weight: 200; letter-spacing: .6em;
+    font-size: clamp(28px, 6vw, 76px); color: #eef2ff;
+  }
+  #intro p { margin: 0; letter-spacing: .35em; text-transform: uppercase; opacity: .7; }
+  #intro button {
+    margin-top: 14px; padding: 12px 38px; font: inherit; letter-spacing: .3em;
+    text-transform: uppercase; color: #eef2ff; background: rgba(140,165,255,.08);
+    border: 1px solid rgba(170,190,255,.45); border-radius: 999px; cursor: pointer;
+  }
+  #intro button:hover { background: rgba(140,165,255,.2); }
+  #intro small { margin-top: 18px; opacity: .5; letter-spacing: .08em; }
+
+  #panel {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 14px 22px;
+    width: max-content; max-width: calc(100vw - 32px); box-sizing: border-box;
+    padding: 16px 22px; background: rgba(9,13,25,.8);
+    border: 1px solid rgba(160,180,255,.16); border-radius: 14px;
+    backdrop-filter: blur(8px); transition: opacity .6s;
+  }
+  body.intro #panel { display: none; }
+  body.idle #panel { opacity: 0; pointer-events: none; }
+  #panel label { display: flex; flex-direction: column; gap: 6px; letter-spacing: .06em; }
+  #panel label span { display: flex; justify-content: space-between; }
+  #panel output { opacity: .6; }
+  #panel input[type=range] { width: 100%; margin: 0; accent-color: #8fa8ff; }
+  #panel .row {
+    grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px;
+  }
+  #panel .row label { flex-direction: row; align-items: center; gap: 7px; }
+  #panel .row .spacer { flex: 1; }
+  #panel button {
+    padding: 7px 16px; font: inherit; color: #dfe6ff; background: rgba(140,165,255,.1);
+    border: 1px solid rgba(170,190,255,.3); border-radius: 999px; cursor: pointer;
+  }
+  #panel button:hover { background: rgba(140,165,255,.24); }
+  @media (max-width: 760px) { #panel { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body class="intro">
+<canvas id="sky"></canvas>
+
+<div id="intro">
+  <h1>KHONSHU</h1>
+  <p>night sky</p>
+  <button id="begin">Begin</button>
+  <small>F fullscreen &nbsp;·&nbsp; M mute &nbsp;·&nbsp; Space meteor &nbsp;·&nbsp; B fireball &nbsp;·&nbsp; S shower &nbsp;·&nbsp; move the mouse for controls</small>
+</div>
+
+<div id="panel">
+  <label><span>Meteors <output id="o-meteors"></output></span><input type="range" id="meteors" min="0" max="40" step="1"></label>
+  <label><span>Volume <output id="o-volume"></output></span><input type="range" id="volume" min="0" max="100" step="1"></label>
+  <label><span>Stars <output id="o-stars"></output></span><input type="range" id="stars" min="30" max="200" step="5"></label>
+  <label><span>Sky drift <output id="o-rotation"></output></span><input type="range" id="rotation" min="0" max="500" step="10"></label>
+  <label><span>Brightness <output id="o-brightness"></output></span><input type="range" id="brightness" min="30" max="100" step="1"></label>
+  <div class="row">
+    <label><input type="checkbox" id="mirror"> Mirror image</label>
+    <label><input type="checkbox" id="sounds"> Meteor sounds</label>
+    <span class="spacer"></span>
+    <button id="shower">Meteor shower</button>
+    <button id="fs">Fullscreen</button>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+// ───────────────────────── settings ─────────────────────────
+const DEFAULTS = { meteors: 6, volume: 60, stars: 100, rotation: 100, brightness: 100, mirror: false, sounds: true };
+const STORE_KEY = 'khonshu-settings';
+const settings = Object.assign({}, DEFAULTS, loadSettings());
+
+function loadSettings() {
+  try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; }
+}
+function saveSettings() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(settings)); } catch {}
+}
+
+// ───────────────────────── helpers ─────────────────────────
+function mulberry32(seed) {
+  return () => {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const nowSec = () => performance.now() / 1000;
+
+// Seeded so the sky is the same every night; meteors use Math.random.
+const rng = mulberry32(20261013);
+function gauss() {
+  const u = Math.max(1e-9, rng()), v = rng();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+function makeNoise() {
+  const perm = new Uint8Array(512), vals = new Float32Array(256);
+  for (let i = 0; i < 256; i++) { perm[i] = i; vals[i] = rng(); }
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1)), t = perm[i]; perm[i] = perm[j]; perm[j] = t;
+  }
+  for (let i = 0; i < 256; i++) perm[i + 256] = perm[i];
+  const fade = t => t * t * (3 - 2 * t);
+  const noise = (x, y) => {
+    const xi = Math.floor(x), yi = Math.floor(y), u = fade(x - xi), v = fade(y - yi);
+    const X = xi & 255, Y = yi & 255;
+    const a = vals[perm[perm[X] + Y]], b = vals[perm[perm[X + 1] + Y]];
+    const c = vals[perm[perm[X] + Y + 1]], d = vals[perm[perm[X + 1] + Y + 1]];
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  };
+  return (x, y, octaves) => {
+    let sum = 0, amp = 0.5, total = 0;
+    for (let o = 0; o < octaves; o++) { sum += amp * noise(x, y); total += amp; x *= 2.03; y *= 2.03; amp *= 0.5; }
+    return sum / total;
+  };
+}
+
+// ───────────────────────── sky model ─────────────────────────
+// Everything lives on a unit disc that rotates slowly around a celestial pole.
+const canvas = document.getElementById('sky');
+const ctx = canvas.getContext('2d', { alpha: false });
+let W = 0, H = 0, unit = 1, poleX = 0, poleY = 0, R = 1;
+
+const BAND = { nx: Math.cos(0.95), ny: Math.sin(0.95), off: 0.14 };
+const MAX_STARS = 9000, BASE_STARS = 4500;
+const BRIGHT_MIN = 0.22, LEVELS = 5, PHASES = 5;
+const LEVEL_ALPHA = [0.3, 0.42, 0.56, 0.7, 0.86];
+const LEVEL_SIZE = [0.9, 1.05, 1.2, 1.4, 1.65];
+const FAINT_TINTS = ['#e6ecff', '#fff3e4', '#dfe8ff', '#ffffff', '#ffeeda'];
+const STAR_COLORS = [[255,255,255], [205,218,255], [172,193,255], [255,244,230], [255,222,182], [255,194,154]];
+const COLOR_WEIGHTS = [0.3, 0.55, 0.65, 0.85, 0.95, 1];
+
+const sx = new Float32Array(MAX_STARS), sy = new Float32Array(MAX_STARS);
+const sb = new Float32Array(MAX_STARS), sph = new Float32Array(MAX_STARS), ssp = new Float32Array(MAX_STARS);
+const sc = new Uint8Array(MAX_STARS);
+let faintBuckets = [], brightStars;
+
+function buildStars() {
+  const buckets = Array.from({ length: LEVELS * PHASES }, () => []), bright = [];
+  for (let i = 0; i < MAX_STARS; i++) {
+    let x, y, b = Math.pow(rng(), 4.2);
+    if (rng() < 0.36) {
+      // crowd extra stars along the Milky Way
+      do {
+        const along = rng() * 2 - 1, across = gauss() * 0.12 + BAND.off;
+        x = across * BAND.nx - along * BAND.ny; y = across * BAND.ny + along * BAND.nx;
+      } while (x * x + y * y > 1);
+      b *= 0.75;
+    } else {
+      const r = Math.sqrt(rng()), th = rng() * Math.PI * 2;
+      x = r * Math.cos(th); y = r * Math.sin(th);
+    }
+    sx[i] = x; sy[i] = y; sb[i] = b;
+    sph[i] = rng() * Math.PI * 2; ssp[i] = 0.5 + rng() * 2;
+    const c = rng(); sc[i] = COLOR_WEIGHTS.findIndex(w => c < w);
+    if (b >= BRIGHT_MIN) bright.push(i);
+    else buckets[Math.floor(b / BRIGHT_MIN * LEVELS) * PHASES + i % PHASES].push(i);
+  }
+  faintBuckets = buckets.map(a => Int32Array.from(a));
+  brightStars = Int32Array.from(bright);
+}
+
+function buildSprite([r, g, b]) {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g2 = c.getContext('2d'), grad = g2.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.06, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.14, `rgba(${r},${g},${b},.75)`);
+  grad.addColorStop(0.3, `rgba(${r},${g},${b},.18)`);
+  grad.addColorStop(0.6, `rgba(${r},${g},${b},.04)`);
+  grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+  g2.fillStyle = grad; g2.fillRect(0, 0, 64, 64);
+  return c;
+}
+
+function buildMilkyWay() {
+  const S = 768, fbm = makeNoise();
+  const c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d'), img = g.createImageData(S, S), d = img.data;
+  for (let j = 0, k = 0; j < S; j++) {
+    const y = j / S * 2 - 1;
+    for (let i = 0; i < S; i++, k += 4) {
+      const x = i / S * 2 - 1, rad = Math.sqrt(x * x + y * y);
+      d[k + 3] = 255;
+      if (rad > 1.03) continue;
+      const across = x * BAND.nx + y * BAND.ny - BAND.off, along = -x * BAND.ny + y * BAND.nx;
+      const bulge = Math.exp(-(((along - 0.15) / 0.35) ** 2));
+      const w = 0.11 + 0.09 * bulge;
+      const dw = across + (fbm(x * 1.3 + 40, y * 1.3 + 40, 3) - 0.5) * 0.14;
+      const clouds = fbm(x * 2.2 + 10, y * 2.2 + 10, 5);
+      let I = Math.exp(-((dw / w) ** 2)) * (0.22 + 1.75 * clouds * clouds);
+      const lane = Math.exp(-(((dw - 0.015) / (w * 0.28)) ** 2)) * fbm(x * 5 + 70, y * 5 + 70, 4);
+      I *= 1 - 0.85 * Math.min(1, lane * 1.5);
+      I *= 0.55 + 0.45 * bulge;
+      I += 0.05 * Math.exp(-((across / (w * 3)) ** 2));
+      I *= clamp((1.02 - rad) / 0.12, 0, 1) * 0.55;
+      const warm = bulge * Math.exp(-((dw / (w * 0.8)) ** 2)), dither = rng() * 1.5;
+      d[k]     = I * (110 + 110 * warm) + dither;
+      d[k + 1] = I * (125 + 70 * warm) + dither;
+      d[k + 2] = I * (178 + 10 * warm) + dither;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+buildStars();
+const sprites = STAR_COLORS.map(buildSprite);
+const fireSprite = buildSprite([150, 255, 200]);
+const milkyWay = buildMilkyWay();
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = canvas.width = Math.round(window.innerWidth * dpr);
+  H = canvas.height = Math.round(window.innerHeight * dpr);
+  unit = Math.max(0.8, Math.min(W, H) / 1000);
+  poleX = W * 0.62; poleY = H * 0.38;
+  R = Math.hypot(Math.max(poleX, W - poleX), Math.max(poleY, H - poleY)) + 30 * unit;
+  if (!radiant.until) pickRadiant(0);
+}
+
+// ───────────────────────── meteors ─────────────────────────
+const METEOR_TINTS = [[255,255,255], [205,225,255], [190,255,222], [255,236,192]];
+const meteors = [], satellites = [];
+const radiant = { x: 0, y: 0, until: 0 };
+let nextMeteor = 3, nextSatellite = 70, showerUntil = 0;
+
+function pickRadiant(now) {
+  radiant.x = W * (-0.15 + Math.random() * 1.3);
+  radiant.y = H * (-0.15 + Math.random() * 1.3);
+  radiant.until = now + 180 + Math.random() * 240;
+}
+
+function meteorRate(now) {
+  return now < showerUntil ? Math.max(settings.meteors, 6) * 10 : settings.meteors;
+}
+function scheduleMeteor(now) {
+  const rate = meteorRate(now);
+  nextMeteor = rate > 0 ? now + Math.max(0.15, -Math.log(1 - Math.random()) * 60 / rate) : Infinity;
+}
+
+function spawnMeteor(now, opts = {}) {
+  const diag = Math.hypot(W, H);
+  const fire = opts.fireball ?? Math.random() < 0.04;
+  const x0 = W * (0.05 + Math.random() * 0.9), y0 = H * (0.05 + Math.random() * 0.9);
+  let ang, scale = 1;
+  if (opts.fromRadiant || Math.random() < 0.7) {
+    // shower members streak away from the radiant; near it they look foreshortened
+    const dx = x0 - radiant.x, dy = y0 - radiant.y;
+    ang = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.12;
+    scale = clamp(Math.hypot(dx, dy) / (0.35 * diag), 0.35, 1);
+  } else {
+    ang = Math.random() * Math.PI * 2;
+  }
+  const len = diag * (0.09 + Math.random() * 0.22) * scale * (fire ? 1.5 : 1);
+  const speed = diag * scale * (fire ? 0.25 + Math.random() * 0.15 : 0.35 + Math.random() * 0.55);
+  const mag = fire ? 1 : 0.3 + 0.7 * Math.random() ** 2;
+  meteors.push({
+    t0: now, x0, y0, cx: Math.cos(ang), cy: Math.sin(ang), len, dur: len / speed, mag, fire,
+    trail: len * (fire ? 0.9 : 0.35 + Math.random() * 0.35),
+    glow: fire ? 2 + Math.random() * 2 : 0.25 + Math.random() * 0.4,
+    w: (1.2 + mag * 2.2) * unit * (fire ? 2 : 1),
+    head: (10 + mag * 26) * unit * (fire ? 1.8 : 1),
+    col: fire ? [170, 255, 205] : pick(METEOR_TINTS),
+  });
+  if (settings.sounds) audio.meteor((x0 / W * 2 - 1) * (settings.mirror ? -1 : 1), mag, fire);
+}
+
+function drawMeteor(m, now) {
+  const t = now - m.t0, flying = t < m.dur, p = Math.min(1, t / m.dur);
+  const q = flying ? 0 : (t - m.dur) / m.glow;
+  if (q >= 1) return false;
+  const env = Math.min(1, p / 0.12) * (1 - 0.6 * p ** 3);
+  const a = flying ? env : 0.4 * (1 - q) ** 2;
+  const hd = m.len * p, td = Math.max(0, hd - m.trail);
+  const hx = m.x0 + m.cx * hd, hy = m.y0 + m.cy * hd;
+  const [r, g, b] = m.col;
+
+  if (hd - td > 0.5) {
+    const tx = m.x0 + m.cx * td, ty = m.y0 + m.cy * td;
+    const half = m.w * (1 + q * 0.8) / 2, nx = -m.cy * half, ny = m.cx * half;
+    const grad = ctx.createLinearGradient(tx, ty, hx, hy);
+    grad.addColorStop(0, `rgba(${r},${g},${b},0)`);
+    grad.addColorStop(0.7, `rgba(${r},${g},${b},${0.45 * a})`);
+    grad.addColorStop(1, flying ? `rgba(255,255,255,${a})` : `rgba(${r},${g},${b},${0.6 * a})`);
+    ctx.globalAlpha = 0.45 + 0.55 * m.mag;
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(hx + nx, hy + ny); ctx.lineTo(hx - nx, hy - ny);
+    ctx.closePath(); ctx.fill();
+  }
+  if (flying) {
+    const ha = env * (p < 0.85 ? 1 : (1 - p) / 0.15), s = m.head * (0.8 + 0.4 * env);
+    if (m.fire) {
+      ctx.globalAlpha = 0.5 * ha;
+      ctx.drawImage(fireSprite, hx - s * 1.1, hy - s * 1.1, s * 2.2, s * 2.2);
+    }
+    ctx.globalAlpha = ha * m.mag;
+    ctx.drawImage(sprites[0], hx - s / 2, hy - s / 2, s, s);
+  }
+  if (m.fire) {
+    // terminal flash as the fireball breaks up
+    const ft = t - (m.dur - 0.06);
+    if (ft > 0 && ft < 0.35) {
+      const s = m.head * (2 + ft * 9);
+      ctx.globalAlpha = 0.9 * (1 - ft / 0.35) ** 2;
+      ctx.drawImage(fireSprite, hx - s / 2, hy - s / 2, s, s);
+    }
+  }
+  return true;
+}
+
+function spawnSatellite(now) {
+  const edge = () => {
+    const e = Math.floor(Math.random() * 4), f = 0.1 + Math.random() * 0.8;
+    return [[f * W, 0], [W, f * H], [f * W, H], [0, f * H]][e];
+  };
+  let a = edge(), b = edge();
+  while (Math.hypot(a[0] - b[0], a[1] - b[1]) < Math.min(W, H) * 0.6) b = edge();
+  satellites.push({ t0: now, dur: 28 + Math.random() * 22, a, b });
+}
+
+// ───────────────────────── render loop ─────────────────────────
+let angle = 0, last = 0;
+
+function drawFaint(n, t, cosA, sinA) {
+  const margin = 4 * unit;
+  for (let k = 0; k < faintBuckets.length; k++) {
+    const idx = faintBuckets[k], level = Math.floor(k / PHASES), ph = k % PHASES;
+    const size = LEVEL_SIZE[level] * unit, half = size / 2, round = size > 2.2;
+    ctx.globalAlpha = LEVEL_ALPHA[level] * (0.82 + 0.18 * Math.sin(t * (0.5 + 0.23 * ph) + ph * 1.7 + level));
+    ctx.fillStyle = FAINT_TINTS[ph];
+    ctx.beginPath();
+    for (let j = 0; j < idx.length; j++) {
+      const i = idx[j];
+      if (i >= n) break;
+      const x = poleX + R * (sx[i] * cosA - sy[i] * sinA);
+      if (x < -margin || x > W + margin) continue;
+      const y = poleY + R * (sx[i] * sinA + sy[i] * cosA);
+      if (y < -margin || y > H + margin) continue;
+      if (round) { ctx.moveTo(x + half, y); ctx.arc(x, y, half, 0, 6.2832); }
+      else ctx.rect(x - half, y - half, size, size);
+    }
+    ctx.fill();
+  }
+}
+
+function drawBright(n, t, cosA, sinA) {
+  const margin = 20 * unit;
+  for (let j = 0; j < brightStars.length; j++) {
+    const i = brightStars[j];
+    if (i >= n) break;
+    const x = poleX + R * (sx[i] * cosA - sy[i] * sinA);
+    if (x < -margin || x > W + margin) continue;
+    const y = poleY + R * (sx[i] * sinA + sy[i] * cosA);
+    if (y < -margin || y > H + margin) continue;
+    const b = sb[i];
+    const tw = 0.8 + 0.2 * Math.sin(t * ssp[i] + sph[i]) + 0.06 * Math.sin(t * ssp[i] * 4.7 + sph[i] * 3);
+    const s = (4 + 26 * b) * unit * (0.92 + 0.08 * tw);
+    ctx.globalAlpha = Math.min(1, (0.55 + 0.45 * b) * tw);
+    ctx.drawImage(sprites[sc[i]], x - s / 2, y - s / 2, s, s);
+  }
+}
+
+function frame(ms) {
+  const now = ms / 1000, dt = Math.min(0.1, now - last);
+  last = now;
+  angle -= dt * settings.rotation / 100 * (2 * Math.PI / (45 * 60));
+
+  if (now > radiant.until) pickRadiant(now);
+  if (now >= nextMeteor) {
+    spawnMeteor(now, { fromRadiant: now < showerUntil });
+    scheduleMeteor(now);
+  }
+  if (now >= nextSatellite) {
+    spawnSatellite(now);
+    nextSatellite = now + 120 + Math.random() * 240;
+  }
+
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.save();
+  ctx.translate(poleX, poleY); ctx.rotate(angle);
+  ctx.globalAlpha = 0.9;
+  ctx.drawImage(milkyWay, -R, -R, 2 * R, 2 * R);
+  ctx.restore();
+
+  const n = Math.min(MAX_STARS, Math.round(BASE_STARS * settings.stars / 100));
+  const cosA = Math.cos(angle), sinA = Math.sin(angle);
+  drawFaint(n, now, cosA, sinA);
+  drawBright(n, now, cosA, sinA);
+
+  for (let i = satellites.length - 1; i >= 0; i--) {
+    const s = satellites[i], p = (now - s.t0) / s.dur;
+    if (p >= 1) { satellites.splice(i, 1); continue; }
+    ctx.globalAlpha = 0.6 * Math.min(1, p * 8, (1 - p) * 8);
+    ctx.fillStyle = '#fff6e0';
+    ctx.beginPath();
+    ctx.arc(s.a[0] + (s.b[0] - s.a[0]) * p, s.a[1] + (s.b[1] - s.a[1]) * p, 1.1 * unit, 0, 6.2832);
+    ctx.fill();
+  }
+  for (let i = meteors.length - 1; i >= 0; i--) {
+    if (!drawMeteor(meteors[i], now)) meteors.splice(i, 1);
+  }
+
+  if (settings.brightness < 100) {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1 - settings.brightness / 100;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+  }
+  requestAnimationFrame(frame);
+}
+
+// ───────────────────────── generative ambient music ─────────────────────────
+const audio = (() => {
+  let ac = null, master, verb, padBus, bellBus, noiseBuf, muted = false;
+  const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+  // D major: Dmaj9, Bm9, Gmaj9, A6/9, F#m11, Em9
+  const CHORDS = [
+    [50, 57, 66, 73, 76], [47, 54, 62, 69, 73], [43, 50, 59, 66, 69],
+    [45, 52, 59, 61, 66], [42, 49, 64, 69, 71], [40, 47, 55, 62, 66],
+  ];
+  const NEXT = [[1, 2, 3, 5], [2, 4, 0], [0, 3, 5], [0, 1, 2], [2, 1], [3, 2, 0]];
+  const BELLS = [74, 76, 78, 81, 83, 86, 88, 90, 93];
+
+  const gain = v => { const g = ac.createGain(); g.gain.value = v; return g; };
+  const filter = (type, freq, q) => {
+    const f = ac.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q; return f;
+  };
+  const lfo = (freq, depth, param) => {
+    const o = ac.createOscillator(); o.frequency.value = freq;
+    o.connect(gain(depth)).connect(param); o.start();
+  };
+
+  function impulse(seconds) {
+    const len = Math.floor(ac.sampleRate * seconds), buf = ac.createBuffer(2, len, ac.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = buf.getChannelData(ch);
+      let y = 0;
+      for (let i = 0; i < len; i++) {
+        y += 0.4 * (Math.random() * 2 - 1 - y);   // one-pole lowpass for a darker tail
+        d[i] = y * Math.pow(1 - i / len, 2.6);
+      }
+    }
+    return buf;
+  }
+
+  function start() {
+    if (ac) { ac.resume(); return; }
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    master = gain(0.0001);
+    const comp = ac.createDynamicsCompressor();
+    comp.threshold.value = -18; comp.ratio.value = 3; comp.attack.value = 0.05; comp.release.value = 0.6;
+    master.connect(comp).connect(ac.destination);
+
+    verb = ac.createConvolver(); verb.buffer = impulse(6.5);
+    verb.connect(gain(0.85)).connect(master);
+
+    padBus = filter('lowpass', 850, 0.3);
+    padBus.connect(gain(0.55)).connect(master);
+    padBus.connect(gain(0.8)).connect(verb);
+    lfo(0.021, 320, padBus.frequency);
+
+    bellBus = gain(1);
+    const delay = ac.createDelay(2), feedback = gain(0.42);
+    delay.delayTime.value = 0.62;
+    bellBus.connect(gain(0.35)).connect(master);
+    bellBus.connect(gain(0.7)).connect(verb);
+    bellBus.connect(delay);
+    delay.connect(filter('lowpass', 2500, 0.5)).connect(feedback).connect(delay);
+    delay.connect(gain(0.5)).connect(verb);
+
+    noiseBuf = ac.createBuffer(1, ac.sampleRate * 5, ac.sampleRate);
+    const nd = noiseBuf.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+
+    // wind
+    const wind = ac.createBufferSource(); wind.buffer = noiseBuf; wind.loop = true;
+    const windFilter = filter('bandpass', 380, 0.6), windGain = gain(0.035);
+    wind.connect(windFilter).connect(windGain);
+    windGain.connect(master); windGain.connect(verb);
+    lfo(0.05, 0.02, windGain.gain); lfo(0.013, 150, windFilter.frequency);
+    wind.start();
+
+    // drone
+    [[38, 0.05, 0.031], [45, 0.022, 0.047], [50, 0.03, 0.07]].forEach(([m, g, rate]) => {
+      const o = ac.createOscillator(), og = gain(g);
+      o.frequency.value = mtof(m);
+      o.connect(og).connect(master);
+      lfo(rate, g * 0.35, og.gain);
+      o.start();
+    });
+
+    master.gain.setTargetAtTime(targetGain(), ac.currentTime, 2.5);
+    chord(0);
+    setTimeout(sparkle, 9000);
+  }
+
+  function chord(idx) {
+    const t = ac.currentTime + 0.1, hold = 18 + Math.random() * 10, att = 5 + Math.random() * 2, rel = 9;
+    CHORDS[idx].forEach((m, i) => {
+      if (i > 1 && Math.random() < 0.15) return;
+      const f = mtof(m), g = gain(0), pan = ac.createStereoPanner();
+      const peak = (i === 0 ? 0.085 : 0.06) * (0.8 + Math.random() * 0.4);
+      pan.pan.value = (Math.random() * 2 - 1) * 0.7;
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(peak, t + att + i * 0.6);
+      g.gain.setTargetAtTime(0, t + hold, rel / 4);
+      g.connect(pan).connect(padBus);
+      [['sine', 1, -4, 1], ['triangle', 1, 6, 0.5], ['sine', 2, 3, 0.12]].forEach(([type, mult, cents, level], k) => {
+        const o = ac.createOscillator();
+        o.type = type; o.frequency.value = f * mult; o.detune.value = cents;
+        o.connect(gain(level)).connect(g);
+        o.start(t); o.stop(t + hold + rel * 1.5);
+        if (k === 0) o.onended = () => pan.disconnect();
+      });
+    });
+    setTimeout(() => chord(pick(NEXT[idx])), (hold - att * 0.6) * 1000);
+  }
+
+  function bell(m, t, vel, panPos) {
+    const f = mtof(m), g = gain(0), pan = ac.createStereoPanner();
+    pan.pan.value = clamp(panPos, -1, 1);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.05 * vel, t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 4.5);
+    g.connect(pan).connect(bellBus);
+    [[1, 1], [2.01, 0.2], [3, 0.06]].forEach(([mult, level], k) => {
+      const o = ac.createOscillator();
+      o.frequency.value = f * mult;
+      o.connect(gain(level)).connect(g);
+      o.start(t); o.stop(t + 4.6);
+      if (k === 0) o.onended = () => pan.disconnect();
+    });
+  }
+
+  function sparkle() {
+    const count = Math.random() < 0.3 ? 2 + Math.floor(Math.random() * 2) : 1;
+    let t = ac.currentTime + 0.05, i = Math.floor(Math.random() * BELLS.length);
+    for (let k = 0; k < count; k++) {
+      bell(BELLS[i], t, 0.5 + Math.random() * 0.5, Math.random() * 1.6 - 0.8);
+      t += 0.28 + Math.random() * 0.5;
+      i = clamp(i + pick([-2, -1, 1, 2]), 0, BELLS.length - 1);
+    }
+    setTimeout(sparkle, (5 + Math.random() * 11) * 1000);
+  }
+
+  function meteor(panPos, mag, fire) {
+    if (!ac || ac.state !== 'running') return;
+    const t = ac.currentTime + 0.02, dur = fire ? 2.2 : 0.9;
+    const src = ac.createBufferSource(), bp = filter('bandpass', 1000, 1.2), g = gain(0), pan = ac.createStereoPanner();
+    src.buffer = noiseBuf; src.loop = true;
+    pan.pan.value = clamp(panPos, -1, 1);
+    bp.frequency.setValueAtTime(fire ? 1800 : 3200 + Math.random() * 1500, t);
+    bp.frequency.exponentialRampToValueAtTime(fire ? 250 : 700, t + dur);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.05 * mag * (fire ? 2 : 1), t + (fire ? 0.3 : 0.08));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(bp).connect(g).connect(pan);
+    pan.connect(verb); pan.connect(gain(0.5)).connect(master);
+    src.start(t, Math.random() * 4); src.stop(t + dur + 0.1);
+    src.onended = () => pan.disconnect();
+    bell(pick(BELLS.slice(4)), t + 0.05, 0.25 + 0.35 * mag, panPos);
+    if (fire) bell(62, t, 0.9, panPos);
+  }
+
+  const targetGain = () => muted ? 0.0001 : Math.max(0.0001, settings.volume / 100 * 0.9);
+  function updateVolume() {
+    if (ac) master.gain.setTargetAtTime(targetGain(), ac.currentTime, 0.25);
+  }
+  function toggleMute() { muted = !muted; updateVolume(); }
+
+  return { start, meteor, updateVolume, toggleMute };
+})();
+
+// ───────────────────────── UI ─────────────────────────
+const $ = id => document.getElementById(id);
+const FORMAT = {
+  meteors: v => v + '/min', volume: v => v + '%', stars: v => v + '%',
+  rotation: v => (v / 100).toFixed(1) + '×', brightness: v => v + '%',
+};
+let started = false, idleTimer = 0;
+
+function applySettings() {
+  canvas.style.transform = settings.mirror ? 'scaleX(-1)' : '';
+  audio.updateVolume();
+  for (const key in FORMAT) $('o-' + key).textContent = FORMAT[key](settings[key]);
+}
+
+for (const key in FORMAT) {
+  $(key).value = settings[key];
+  $(key).addEventListener('input', e => {
+    settings[key] = +e.target.value;
+    if (key === 'meteors') scheduleMeteor(nowSec());
+    applySettings(); saveSettings();
+  });
+}
+for (const key of ['mirror', 'sounds']) {
+  $(key).checked = settings[key];
+  $(key).addEventListener('change', e => { settings[key] = e.target.checked; applySettings(); saveSettings(); });
+}
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen?.().catch(() => {});
+}
+function startShower() {
+  const now = nowSec();
+  showerUntil = now + 25;
+  scheduleMeteor(now);
+}
+async function keepAwake() {
+  try { await navigator.wakeLock?.request('screen'); } catch {}
+}
+function begin() {
+  if (started) return;
+  started = true;
+  audio.start();
+  keepAwake();
+  $('intro').classList.add('gone');
+  document.body.classList.remove('intro');
+  if (!document.fullscreenElement) toggleFullscreen();
+  wake();
+}
+function wake() {
+  document.body.classList.remove('idle');
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    if (started && !$('panel').matches(':hover')) document.body.classList.add('idle');
+    else if (started) wake();
+  }, 3500);
+}
+
+$('intro').addEventListener('click', begin);
+$('fs').addEventListener('click', toggleFullscreen);
+$('shower').addEventListener('click', startShower);
+window.addEventListener('mousemove', wake);
+window.addEventListener('pointerdown', wake);
+window.addEventListener('resize', resize);
+document.addEventListener('visibilitychange', () => {
+  if (started && document.visibilityState === 'visible') { keepAwake(); audio.start(); }
+});
+window.addEventListener('keydown', e => {
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  const key = e.key.toLowerCase();
+  if (!started) { if (key === 'enter' || key === ' ') { e.preventDefault(); begin(); } return; }
+  if (key === 'f') toggleFullscreen();
+  else if (key === 'm') audio.toggleMute();
+  else if (key === 's') startShower();
+  else if (key === 'b') spawnMeteor(nowSec(), { fireball: true });
+  else if (key === ' ') { e.preventDefault(); spawnMeteor(nowSec(), { fireball: false }); }
+});
+
+resize();
+applySettings();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
